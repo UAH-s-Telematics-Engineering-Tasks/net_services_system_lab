@@ -6,6 +6,8 @@
 #include <signal.h>
 #include <stdlib.h>
 
+#define BUFF_SIZE 64
+
 void keyboard_int_handler(int);
 void quit_error(char*);
 
@@ -23,6 +25,7 @@ int main(int argc, char** argv) {
 
     signal(SIGINT, keyboard_int_handler);
 
+    int tcp_sock = 0;
     if(tcp_sock = socket(AF_INET, SOCK_STREAM, 0) == -1)
         quit_error("Error creating the socket... Good bye!\n");
 
@@ -45,17 +48,25 @@ int main(int argc, char** argv) {
     if(!inet_aton(argv[1], &serv_addr.sin_addr))
         quit_error("The provided IP address is NOT valid!\n");
 
-    if(connect(tcp_sock, (struct sockaddr*) serv_addr, sizeof struct sockaddr_in))
+    if(connect(tcp_sock, (struct sockaddr*) &serv_addr, sizeof(struct sockaddr_in)))
         quit_error("Couldn't connect...\n");
 
     #if DBG
     printf("Connected to the server!\n");
     #endif
 
+    char in_buffer[BUFF_SIZE] = {0};
+
     while(continue_pinging) {
+        if(write(tcp_sock, "Echo request", sizeof "Echo request") == -1)
+            quit_error("Error when making an echo request...");
 
+        printf("Got reply: ");
+        while(read(tcp_sock, in_buffer, BUFF_SIZE))
+            printf("%s", in_buffer);
     }
-
+    close(tcp_sock);
+    return 0;
 }
 
 void keyboard_int_handler(int dummy) {

@@ -9,7 +9,7 @@
 // R/W
 #include <unistd.h>
 #include <signal.h>
-#include <stdlib.h>
+#include <stdlib.h> // Exit
 
 #define BUFF_SIZE 65
 #define QUEUE_LEN 5
@@ -60,13 +60,17 @@ int main(int argc, char** argv) {
     sock_conf.sin_family = AF_INET;
 
     // Set the port number from the passed argument
+    #if DBG
+    int port = atoi(argv[1]);
+    #endif
+
     sock_conf.sin_port = (in_port_t) htonl(atoi(argv[1]));
 
     // Bind to localhost!
     sock_conf.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
     #if DBG
-    printf("Server address: %s\n", inet_ntoa(sock_conf.sin_addr));
+    printf("Server address: %s:%d\n", inet_ntoa(sock_conf.sin_addr), ntohl(sock_conf.sin_port));
     #endif
 
     // Ready to bind!
