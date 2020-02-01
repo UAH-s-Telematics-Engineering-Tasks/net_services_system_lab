@@ -31,6 +31,7 @@ int main(int argc, char** argv) {
         Let's build our address structure. As seen in 'man ip.7' we need to define a sockaddr_in struct for IPv4 sockets!
     */
     struct sockaddr_in sock_conf;
+
     // Zero out the entire struct
     memset(&sock_conf, 0, sizeof(struct sockaddr_in));
 
@@ -41,7 +42,7 @@ int main(int argc, char** argv) {
     sock_conf.sin_port = (in_port_t) htonl(atoi(argv[1]));
 
     // Bind to localhost!
-    sock_conf.sin_addr.s_addr = hlon(INADDR_LOOPBACK);
+    sock_conf.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
     // // Set IP address number from the passed argument
     // if (!inet_aton(argv[1], &sock_conf.sin_addr) {
@@ -59,6 +60,14 @@ int main(int argc, char** argv) {
     if (listen(tcp_sock, 5)) {
         fprintf(stderr, "Error when trying to listen...\n");
         return -1;
+    }
+
+    /*
+        Listening sockets are blocing by default in the sense that calls to accept() involving this passive socket will block the caller until a connection is present. This implies we'll be blocked if the queue is empty and we'll extract queued connections otherwise! We just need to run an infinite loop getting those clientes but before that we need to define a structure for getting the client's info! Note that an empty constan defaults to a non-zero value as found in C's standard; that's why for (;;) is an infinite loop but we prefer the more classic and simpler while (1);
+    */
+
+    while(1) {
+
     }
 
     
