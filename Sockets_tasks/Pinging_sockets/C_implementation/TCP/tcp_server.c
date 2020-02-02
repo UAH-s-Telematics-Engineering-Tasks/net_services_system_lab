@@ -31,8 +31,8 @@ int main(int argc, char** argv) {
 
     signal(SIGINT, keyboard_int_handler);
 
-     int seq_number = 0, tcp_sock, client_fd, read_bytes = 0;
-     char buffer[BUFF_SIZE] = {0}, backup_buffer[BUFF_SIZE] = {0};
+    int seq_number = 0, tcp_sock, client_fd, read_bytes = 0;
+    char buffer[BUFF_SIZE] = {0}, backup_buffer[BUFF_SIZE] = {0};
 
     /*
         AF_INET -> IPv4 socket
