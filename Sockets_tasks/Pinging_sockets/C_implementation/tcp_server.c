@@ -62,15 +62,16 @@ int main(int argc, char** argv) {
     // Set the port number from the passed argument
     #if DBG
     int port = atoi(argv[1]);
-    #endif
+    sock_conf.sin_port = htons(port);
+    #else
 
     sock_conf.sin_port = (in_port_t) htonl(atoi(argv[1]));
-
+    #endif
     // Bind to localhost!
     sock_conf.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
     #if DBG
-    printf("Server address: %s:%d\n", inet_ntoa(sock_conf.sin_addr), ntohl(sock_conf.sin_port));
+    printf("Server address: %s:%d\n", inet_ntoa(sock_conf.sin_addr), ntohs(sock_conf.sin_port));
     #endif
 
     // Ready to bind!
@@ -104,13 +105,18 @@ int main(int argc, char** argv) {
     #endif
 
     while(loop_flag) {
-        if ((read_bytes = read(client_fd, buffer, BUFF_SIZE)) != -1 && read_bytes < 15)
-            while(read_bytes < 15) {
+        // If we read 0 bytes then assume the client has closed the connection...
+        if ((read_bytes = read(client_fd, buffer, BUFF_SIZE)) > 0)
+            while(read_bytes < sizeof("Echo request")) {
                 read_bytes += read(client_fd, backup_buffer, BUFF_SIZE);
                 strcat(buffer, backup_buffer);
             }
         else
-            quit_error("Error when reading data...\n");
+            loop_flag = 0;
+
+        #if DBG
+        printf("Received %d bytes! Message: %s\n", read_bytes, buffer);
+        #endif
 
         seq_number += 1;
 
@@ -118,13 +124,16 @@ int main(int argc, char** argv) {
         sprintf(backup_buffer, "Echo reply # %d", seq_number);
 
         if (!strcmp("Echo request", buffer)) {
-            printf("Received an echo request from: %s:%d\n", inet_ntoa(client_sock.sin_addr), ntohl(client_sock.sin_port));
-            write(client_fd, backup_buffer, sizeof(backup_buffer));
+            printf("Received an echo request from: %s:%d\n", inet_ntoa(client_sock.sin_addr), ntohs(client_sock.sin_port));
+            if(write(client_fd, backup_buffer, sizeof(backup_buffer)) == -1)
+                loop_flag = 0;
         }
-        else {
-            printf("Received a weird message from: %s:%d\n", inet_ntoa(client_sock.sin_addr), ntohl(client_sock.sin_port));
-        }
+        else
+            printf("Received a weird message from: %s:%d\n", inet_ntoa(client_sock.sin_addr), ntohs(client_sock.sin_port));
     }
+    #if DBG
+    printf("Client disconnected!\n");
+    #endif
     close(client_fd);
     close(tcp_sock);
     return 0;
@@ -132,7 +141,7 @@ int main(int argc, char** argv) {
 
 void keyboard_int_handler(int dummy) {
     loop_flag = 0;
-    #if DBG
+    #if INTCLOSE
     printf("Quitting...\n");
     exit(0);
     #endif
