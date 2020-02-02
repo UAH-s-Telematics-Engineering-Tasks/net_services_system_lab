@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
             quit_error("Error when accepting the connection...\n");
 
     #if DBG
-    printf("Accepted a connection! Loop time!\n");
+    printf("Connected to: %s:%d. Loop time!\n", inet_ntoa(client_sock.sin_addr), ntohs(client_sock.sin_port));
     #endif
 
     while(loop_flag) {
@@ -124,12 +124,16 @@ int main(int argc, char** argv) {
         sprintf(backup_buffer, "Echo reply # %d", seq_number);
 
         if (!strcmp("Echo request", buffer)) {
-            printf("Received an echo request from: %s:%d\n", inet_ntoa(client_sock.sin_addr), ntohs(client_sock.sin_port));
+            #if DBG
+            printf("Received an echo request!\n");
+            #endif
             if(write(client_fd, backup_buffer, sizeof(backup_buffer)) == -1)
                 loop_flag = 0;
         }
+        #if DBG
         else
             printf("Received a weird message from: %s:%d\n", inet_ntoa(client_sock.sin_addr), ntohs(client_sock.sin_port));
+        #endif
     }
     #if DBG
     printf("Client disconnected!\n");
