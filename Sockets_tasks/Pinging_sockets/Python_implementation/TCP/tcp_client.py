@@ -1,39 +1,36 @@
-from socket import *
+import socket, sys, time, signal, re
 
-shutdown_message = "#0FF!"
-server_ip = "192.168.1.36"
-server_port = 12000
-turn_off = False
+def main():
+    if len(sys.argv) != 3:
+        print("Use: {} IP port".format(sys.argv[0]))
+        exit(-1)
 
-def exit(question):
-    option = input(question + "(y/n): ")
-    option = option.lower()
-    if option == 'y':
-        return True
-    elif option == 'n':
-        return False
-    else:
-        return exit()
+    if not re.match(r'(\d{1,2}|1\d\d|2[0-4]\d|255)\.(\d{1,2}|1\d\d|2[0-4]\d|255)\.(\d{1,2}|1\d\d|2[0-4]\d|255)\.(\d{1,2}|1\d\d|2[0-4]\d|255)$', sys.argv[1]):
+        print("The provided IP address is NOT valid!")
+        exit(-1)
 
-client_socket = socket(AF_INET, SOCK_STREAM)
-client_socket.connect((server_ip, server_port))
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-print("Welcome to the remote capitalizator!")
+    def k_int_handler(foo, fuu):
+        print("Quitting!")
+        client_socket.close()
+        exit(0)
 
-while not turn_off:
-    message = input("String to capitalize: ")
-    client_socket.send(message.encode())
-    cap_sentence = client_socket.recv(2048).decode()
-    print("Received cap_sentence: " + cap_sentence)
-    turn_off = exit("Quit? ")
-    if not turn_off:
-        client_socket.send("CONT".encode())
-    else:
-        client_socket.send("DISC!".encode())
-if exit("Shut server? ") == True:
-    print("Sending shutdown...")
-    client_socket.send(shutdown_message.encode())
-    close_socket = socket(AF_INET, SOCK_STREAM)
-    close_socket.connect((server_ip, server_port))
-    close_socket.close()
-client_socket.close()
+    signal.signal(signal.SIGINT, k_int_handler)
+
+    client_socket.connect((sys.argv[1], int(sys.argv[2])))
+
+    while True:
+        try:
+            client_socket.send("Echo request".encode())
+        except:
+            k_int_handler(None, None)
+
+        in_msg = client_socket.recv(2048).decode()
+        if in_msg == '':
+            k_int_handler(None, None)
+        print("Echo reply # {}".format(re.findall(r'\d+', in_msg)[0]))
+        time.sleep(1)
+
+if __name__ == "__main__":
+    main()

@@ -1,19 +1,22 @@
 import socket, sys, signal
 
-loop_flag = True
+def main():
+    loop_flag = True
 
-def k_int_handler(foo, fuu):
-    global loop_flag
-    loop_flag = False
-
-if __name__ == "__main__":
-    if len(sys.argv != 2):
-        print("Use: {} port".format(argv[0]))
+    if len(sys.argv) != 2:
+        print("Use: {} port".format(sys.argv[0]))
         exit(-1)
+
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    def k_int_handler(foo, fuu):
+        print("Shutting down!")
+        server_socket.close()
+        exit(0)
 
     signal.signal(signal.SIGINT, k_int_handler)
 
-    server_socket = socket(socket.AF_INET, socket.SOCK_DGRAM)
+    
     server_socket.bind(('127.0.0.1', int(sys.argv[1])))
 
     print("Server ready!")
@@ -23,10 +26,13 @@ if __name__ == "__main__":
         if message.decode() == "Echo request":
             if not source_addr in proc_2_seq_num:
                 proc_2_seq_num[source_addr] = 0
-             proc_2_seq_num[source_addr] += 1
-             server_socket.sendto("Echo reply # {}".format(proc_2_seq_num[source_addr]), source_addr)
-        elif message.decode() == '':
-            print("Closing...")
-            server_socket.close()
-            loop_flag = False
+            proc_2_seq_num[source_addr] += 1
+            server_socket.sendto("Echo reply # {}".format(proc_2_seq_num[source_addr]).encode(), source_addr)
+        # elif message.decode() == '':
+        #     print("Closing...")
+        #     server_socket.close()
+        #     loop_flag = False
     print("Shutting down!")
+
+if __name__ == "__main__":
+    main()

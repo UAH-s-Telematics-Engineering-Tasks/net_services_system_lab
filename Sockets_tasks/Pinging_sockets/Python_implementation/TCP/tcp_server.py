@@ -1,54 +1,63 @@
-from socket import *
-from threading import *
+import socket, threading, sys, signal
 
-#Globals!
 simul_users = 0
-OFF = False
+thread_kill = False
 
 def client_connection (c_socket, addr):
     global simul_users
-    global OFF
-    disconnect = False
     simul_users += 1
-    print("Yay! Got a connection from: ", end="")
-    print(addr)
-    while True:
+    seq_number = 0
+    print("Thread started for: {}:{}".format(addr[0], addr[1]))
+    while not thread_kill:
         message = c_socket.recv(2048).decode()
-        cap_message = message.upper()
-        c_socket.send((cap_message).encode())
-        if c_socket.recv(2048).decode() == "DISC!":
-            print("Disconnect client!")
-            if c_socket.recv(2048).decode() == "#0FF!":
-                print("Received OFF signal!")
-                OFF = True
+        if message == '':
             simul_users -= 1
             c_socket.close()
             return
+        elif message == "Echo request":
+            seq_number += 1
+            try:
+                c_socket.send("Echo reply # {}".format(seq_number).encode())
+            except:
+                print("Socker closed!")
+                simul_users -= 1
+                c_socket.close()
+                return
 
 def main():
-    global simul_users
-    global OFF
-    server_port = 12000
+    if len(sys.argv) != 2:
+        print("Use: {} port".format(sys.argv[0]))
+        exit(-1)
+
     threads = []
-    #Socket configuration
-    server_socket = socket(AF_INET, SOCK_STREAM)
-    server_socket.bind(('', server_port))
-    server_socket.listen(1) #Allow 1 user in the queue, reject others!
+
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    # This function is here so that it 'sees' server_socket to be able to close it!
+    def k_int_handler(foo, fuu):
+        global thread_kill
+        thread_kill = True
+        print("Shutting down!")
+        for thread in threads: # Don't wait for the last dummy thread!
+            thread.join()
+        server_socket.close()
+        exit(0)
+
+    signal.signal(signal.SIGINT, k_int_handler)
+
+    # Use server_socket.bind('', int(sys.argv[1])) to allow outside connections!
+    # '' == sock.INADDR_ANY -> Bind to every interface!
+    server_socket.bind(('127.0.0.1', int(sys.argv[1])))
+    server_socket.listen(1)
 
     print("Ready for connections!")
 
-    while not OFF:
+    while True:
         print("Number of active connections: %d" % (simul_users))
-        connection_socket, client_addr = server_socket.accept() #Wait here until you get a new connection!
-        threads.append(Thread(target = client_connection, args = (connection_socket, client_addr)))
-        print("# of threads: %d" % (len(threads)))
-        if not OFF:
-            threads[len(threads) - 1].start()
-        else:
-            connection_socket.close() #Close the last dummy socket!
-    print("Closing...")
-    for i in range(len(threads) - 1): #Don't wait for the last dummy thread!
-        threads[i].join()
-    print("Goodbye!")
-    server_socket.close()
-main()
+        connection_socket, client_addr = server_socket.accept() # Wait here until you get a new connection!
+        threads.append(threading.Thread(target = client_connection, args = (connection_socket, client_addr)))
+        print("# of threads: {}".format(len(threads)))
+        threads[-1].start()
+
+if __name__ == "__main__":
+    main()
