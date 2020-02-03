@@ -8,6 +8,11 @@
 #include <errno.h>
 #include <time.h>
 
+// TODO: Change the endiannes to BIG ENDIAN! Take into account it happens at the BYTE level... Call htons() and mask away!
+// TODO: Fix the checksum computation...
+// NOTE: Reading from the raw_sock returns the IP Header too!!!!! Parse it out or prevent the socket from returning it all along...
+// NOTE: Running the program requires sudo privileges. Otherwise port writes will just fail...
+
 // Echo request anatomy -> https://en.wikipedia.org/wiki/Ping_(networking_utility)
 
 /*
@@ -28,6 +33,7 @@ Checksum -> Break the entire header into 16-bit chunks taking the checksum to ha
 
 int compute_checksum(int*, int);
 int ones_complement_16_bit_sum(int, int, char);
+void print_binary_16_bit_n(int);
 void keyboard_int_handler(int);
 void quit_error(char*);
 
@@ -35,7 +41,7 @@ volatile int continue_pinging = 1;
 
 int main(int argc, char** argv) {
     if (argc != 2) {
-        printf("Use: %s IP", argv[0])
+        printf("Use: %s IP", argv[0]);
         return -1;
     }
     // As seen in RFC 1700, page 8, IANA's Protocol Number for ICMP is 1
@@ -47,9 +53,33 @@ int main(int argc, char** argv) {
     // the kernels network stack implementation!
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(0);
-    if (!inet_aton(argv[1], &server_addr.s_addr))
+    if (!inet_aton(argv[1], &server_addr.sin_addr))
         quit_error("The provided IP is NOT valid!\n");
 
+    // Checksum without payload: 0xFFF5
+    // int icmp_msg[2] = {0x0000 << 16 | 0x00 << 8 | 0x08, 0x0001 << 16 | 0x0001};
+    int icmp_msg[4] = {0xDE27 << 16 | 0x00 << 8 | 0x08, 0x0001 << 16 | 0x0001, 0x50 << 24, 0x6F6C6261};
+    // icmp_msg[0] = (icmp_msg[0] & 0xFFFF) | compute_checksum(icmp_msg, sizeof(icmp_msg) / sizeof(icmp_msg[0])) << 16;
+    // icmp_msg[0] |= (compute_checksum(icmp_msg, sizeof(icmp_msg) / sizeof(icmp_msg[0])) & 0xFFFF) << 16;
+
+    printf("ICMP Message Header:\n");
+    for (int i = 0; i < sizeof(icmp_msg) / sizeof(icmp_msg[0]); i++)
+        for (int k = 0; k < sizeof(icmp_msg[0]) * 8 / 16; k++) {
+            printf("\t");
+            print_binary_16_bit_n(icmp_msg[i] >> 16 * k);
+        }
+
+    unsigned int serv_addr_size = sizeof server_addr;
+    int curr_time;
+    int in_buff[10];
+    while(continue_pinging) {
+        printf("Sent bytes: %ld", sendto(raw_sock, icmp_msg, sizeof(icmp_msg), 0, (struct sockaddr*) &server_addr, sizeof(server_addr)));
+        printf("\tReceived bytes: %ld\n", recvfrom(raw_sock, in_buff, 10 * 4, 0, (struct sockaddr*) &server_addr, &serv_addr_size));
+        curr_time = time(NULL);
+        while(time(NULL) - curr_time < 1);
+    }
+    close(raw_sock);
+    return 0;
 }
 
 int compute_checksum(int* arr, int n_elms) {
@@ -83,6 +113,16 @@ int ones_complement_16_bit_sum(int x, int y, char recirculate) {
         aux_result = ones_complement_16_bit_sum(aux_result, 1, 0);
 
     return aux_result & 0xFFFF;
+}
+
+void print_binary_16_bit_n(int n) {
+    for (int i = 0; i < 16; i++) {
+        if (n & 1 << i)
+            printf("1");
+        else
+            printf("0");
+    }
+    printf("\n");
 }
 
 void keyboard_int_handler(int dummy) {
