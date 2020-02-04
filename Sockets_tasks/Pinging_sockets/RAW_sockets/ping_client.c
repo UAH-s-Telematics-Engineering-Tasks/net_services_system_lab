@@ -8,8 +8,7 @@
 #include <errno.h>
 #include <time.h>
 
-// TODO: Change the endiannes to BIG ENDIAN! Take into account it happens at the BYTE level... Call htons() and mask away!
-// TODO: Fix the checksum computation...
+// TODO: Apply loops to packet generation
 // NOTE: Reading from the raw_sock returns the IP Header too!!!!! Parse it out or prevent the socket from returning it all along...
 // NOTE: Running the program requires sudo privileges. Otherwise port writes will just fail...
 
@@ -32,8 +31,9 @@ Checksum -> Break the entire header into 16-bit chunks taking the checksum to ha
 */
 
 int compute_checksum(int*, int);
+void generate_icmp_msg(unsigned int*, int);
+int little_to_big_endian(int);
 int ones_complement_16_bit_sum(int, int, char);
-void print_binary_16_bit_n(int);
 void keyboard_int_handler(int);
 void quit_error(char*);
 
@@ -44,7 +44,7 @@ int main(int argc, char** argv) {
         printf("Use: %s IP", argv[0]);
         return -1;
     }
-    // As seen in RFC 1700, page 8, IANA's Protocol Number for ICMP is 1
+    // As seen in RFC 1700, page 8, IANA's Protocol Number for ICMP is 1. This is the protocol discriminator used in IP!
     int raw_sock = socket(AF_INET, SOCK_RAW, 1);
 
     struct sockaddr_in server_addr;
@@ -56,18 +56,8 @@ int main(int argc, char** argv) {
     if (!inet_aton(argv[1], &server_addr.sin_addr))
         quit_error("The provided IP is NOT valid!\n");
 
-    // Checksum without payload: 0xFFF5
-    // int icmp_msg[2] = {0x0000 << 16 | 0x00 << 8 | 0x08, 0x0001 << 16 | 0x0001};
-    int icmp_msg[4] = {0xDE27 << 16 | 0x00 << 8 | 0x08, 0x0001 << 16 | 0x0001, 0x50 << 24, 0x6F6C6261};
-    // icmp_msg[0] = (icmp_msg[0] & 0xFFFF) | compute_checksum(icmp_msg, sizeof(icmp_msg) / sizeof(icmp_msg[0])) << 16;
-    // icmp_msg[0] |= (compute_checksum(icmp_msg, sizeof(icmp_msg) / sizeof(icmp_msg[0])) & 0xFFFF) << 16;
-
-    printf("ICMP Message Header:\n");
-    for (int i = 0; i < sizeof(icmp_msg) / sizeof(icmp_msg[0]); i++)
-        for (int k = 0; k < sizeof(icmp_msg[0]) * 8 / 16; k++) {
-            printf("\t");
-            print_binary_16_bit_n(icmp_msg[i] >> 16 * k);
-        }
+    unsigned int icmp_msg[6];
+    generate_icmp_msg(icmp_msg, sizeof(icmp_msg));
 
     unsigned int serv_addr_size = sizeof server_addr;
     int curr_time;
@@ -85,21 +75,48 @@ int main(int argc, char** argv) {
 int compute_checksum(int* arr, int n_elms) {
     int checksum = 0;
     for (int i = 0; i < n_elms; i++)
-        for (int mask_shift = 0; mask_shift < 2; mask_shift++)
-            checksum = ones_complement_16_bit_sum(arr[i] & (0xFFFF << 16 * mask_shift), checksum, 1);
+        for (int mask_shift = 1; mask_shift >= 0; mask_shift--)
+            checksum = ones_complement_16_bit_sum((arr[i] & (0xFFFF << 16 * mask_shift)) >> 16 * mask_shift, checksum, 1);
     return (~checksum) & 0xFFFF;
 }
 
+void generate_icmp_msg(unsigned int* msg, int size) {
+    char type = 0x08, code = 0x00;
+    int checksum = 0x0000, id = 0x0002, seq_num = 0x0001;
+
+    msg[0] = type << 24 | code << 16 | checksum;
+    msg[1] = id << 16 | seq_num;
+    msg[2] = 'S' << 24 | 'a' << 16 | 'i' << 8 | 'b';
+    msg[3] = 'a' << 24 | ' ' << 16 | 'S' << 8 | 'a';
+    msg[4] = 'm' << 24 | 'u' << 16 | 'r' << 8 | 'a';
+    msg[5] = 'i' << 24 | '!' << 16 | 'P' << 8 | 'c';
+
+    // Adjust to the network's endianness!
+    msg[0] = little_to_big_endian(msg[0] | compute_checksum(msg, 6));
+    msg[1] = little_to_big_endian(msg[1]);
+    msg[2] = little_to_big_endian(msg[2]);
+    msg[3] = little_to_big_endian(msg[3]);
+    msg[4] = little_to_big_endian(msg[4]);
+    msg[5] = little_to_big_endian(msg[5]);
+}
+
+int little_to_big_endian(int n) {
+    int little_end_bytes[4];
+    for (int i = 0; i < 4; i++)
+        little_end_bytes[i] = (n & (0xFF << i * 8)) >> i * 8;
+
+    return little_end_bytes[0] << 24 | little_end_bytes[1] << 16 | little_end_bytes[2] << 8 | little_end_bytes[3];
+}
+
 int ones_complement_16_bit_sum(int x, int y, char recirculate) {
-    // n = 16 as that's the boundry between the numbers. We prefer to show the logic to obtain that result
-    int aux_result = 0, carry = 0, n = sizeof(x) * (8 / 2), aux_operand = y;
+    int aux_result = 0, carry = 0, aux_operand = y;
     // If we are just recirculating the carry take into account the offset we apply to the second operand so that
     // we don't have to rewrite the condition within the for loop...
     if (!recirculate)
-        aux_operand = 1 << n;
+        aux_operand = 1;
 
-    for (int k = 0; k < n; k++) {
-            if (((x & 0x1 << k) >> k) != ((aux_operand & 0x1 << k + n) >> k + n))
+    for (int k = 0; k < 16; k++) {
+            if (((x & 0x1 << k) >> k) != ((aux_operand & 0x1 << k) >> k))
                 aux_result |= (carry ^ 0x1) << k;
             else {
                 aux_result |= carry << k;
@@ -113,16 +130,6 @@ int ones_complement_16_bit_sum(int x, int y, char recirculate) {
         aux_result = ones_complement_16_bit_sum(aux_result, 1, 0);
 
     return aux_result & 0xFFFF;
-}
-
-void print_binary_16_bit_n(int n) {
-    for (int i = 0; i < 16; i++) {
-        if (n & 1 << i)
-            printf("1");
-        else
-            printf("0");
-    }
-    printf("\n");
 }
 
 void keyboard_int_handler(int dummy) {
