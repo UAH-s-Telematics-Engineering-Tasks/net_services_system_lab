@@ -6,7 +6,7 @@ void print_binary_16_bit_n(int);
 int main(void) {
     int result;
     printf("Result: ");
-    print_binary_16_bit_n(result = ones_complement_16_bit_sum(0x0A << 16 | ~0xC & 0xFFFF, 1));
+    print_binary_16_bit_n(result = ones_complement_16_bit_sum(2048 | 0, 1));
     printf("Non-inverted result: %u\n", result & 0xFFFF);
     printf("Inverted result: %u\n", ~result & 0xFFFF);
     return 0;
