@@ -10,6 +10,7 @@
 
 // TODO: Apply loops to packet generation
 // NOTE: Reading from the raw_sock returns the IP Header too!!!!! Parse it out or prevent the socket from returning it all along...
+// NOTE: Quitting with CTRL + C throws an exit code different than 0... Check out why!
 // NOTE: Running the program requires sudo privileges. Otherwise port writes will just fail...
 
 // Echo request anatomy -> https://en.wikipedia.org/wiki/Ping_(networking_utility)
