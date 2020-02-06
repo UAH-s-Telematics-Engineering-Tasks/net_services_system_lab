@@ -62,11 +62,12 @@ int main(int argc, char** argv) {
     generate_icmp_msg(icmp_msg, sizeof(icmp_msg));
 
     unsigned int serv_addr_size = sizeof server_addr;
-    int curr_time;
-    int in_buff[10];
+    int curr_time, recv_bytes;
+    int in_buff[60];
     while(continue_pinging) {
         printf("Sent bytes: %ld", sendto(raw_sock, icmp_msg, sizeof(icmp_msg), 0, (struct sockaddr*) &server_addr, sizeof(server_addr)));
-        printf("\tReceived bytes: %ld\n", recvfrom(raw_sock, in_buff, 10 * 4, 0, (struct sockaddr*) &server_addr, &serv_addr_size));
+        recv_bytes = recvfrom(raw_sock, in_buff, sizeof(in_buff), 0, (struct sockaddr*) &server_addr, &serv_addr_size);
+        printf("\tReceived %d bytes from %s\n", recv_bytes, inet_ntoa(server_addr.sin_addr));
         curr_time = time(NULL);
         while(time(NULL) - curr_time < 1);
     }

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <time.h>
+#include <netdb.h> // gethostbyname()
 
 #define BUFF_SIZE 64
 
@@ -14,6 +15,7 @@ void keyboard_int_handler(int);
 void quit_error(char*);
 
 volatile int continue_pinging = 1;
+volatile int udp_sock;
 
 int main(int argc, char** argv) {
     if (argc != 3) {
@@ -27,7 +29,6 @@ int main(int argc, char** argv) {
 
     signal(SIGINT, keyboard_int_handler);
 
-    int udp_sock;
     if ((udp_sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
         quit_error("Couldn't create the socket...\n");
 
@@ -40,9 +41,9 @@ int main(int argc, char** argv) {
 
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(atoi(argv[2]));
-    if (!inet_aton(argv[1], &server_addr.sin_addr))
-        quit_error("The provided IP address is NOT valid!\n");
+    server_addr.sin_addr = *((struct in_addr*) gethostbyname(argv[1])->h_addr_list[0]);
 
+    // Note inet_ntoa() has a statically allocated buffer. We would need to malloc() space or define a char array otherwise...
     #ifdef DBG
         printf("Server is @:\n\tIP: %s\tPORT: %d\n", inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port));
     #endif
@@ -51,10 +52,10 @@ int main(int argc, char** argv) {
     int curr_time = 0, recv_bytes = 0, last_seq_number = -1;
     while (continue_pinging) {
         if(sendto(udp_sock, "Echo request", sizeof "Echo request", 0, (struct sockaddr*) &server_addr, sizeof server_addr) == -1)
-            continue_pinging = 0;
+            break;
 
         if((recv_bytes = recvfrom(udp_sock, in_buffer, BUFF_SIZE, 0, (struct sockaddr*) &server_addr, &serv_addr_size)) <= 0)
-            continue_pinging = 0;
+            break;
 
         if(last_seq_number < atoi(strpbrk(in_buffer, "0123456789"))) {
             last_seq_number = atoi(strpbrk(in_buffer, "0123456789"));
@@ -74,6 +75,7 @@ int main(int argc, char** argv) {
 void keyboard_int_handler(int dummy) {
     continue_pinging = 0;
     #if INTCLOSE
+        close(udp_sock);
         printf("Quitting...\n");
         exit(0);
     #endif

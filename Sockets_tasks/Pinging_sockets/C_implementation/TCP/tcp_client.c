@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <time.h>
+#include <netdb.h>
 
 #define BUFF_SIZE 64
 
@@ -45,10 +46,11 @@ int main(int argc, char** argv) {
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(atoi(argv[2]));
+    serv_addr.sin_addr = *((struct in_addr*) gethostbyname(argv[1])->h_addr_list[0]);
 
-    // The call to inet_aton() already updates the contents of the struct!
-    if(!inet_aton(argv[1], &serv_addr.sin_addr))
-        quit_error("The provided IP address is NOT valid!\n");
+    // // The call to inet_aton() already updates the contents of the struct!
+    // if(!inet_aton(argv[1], &serv_addr.sin_addr))
+    //     quit_error("The provided IP address is NOT valid!\n");
 
     #if DBG
     printf("Server address: %s:%d\n", inet_ntoa(serv_addr.sin_addr), ntohs(serv_addr.sin_port));

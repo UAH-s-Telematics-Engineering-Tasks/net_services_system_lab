@@ -16,6 +16,7 @@ struct client_echo {
 };
 
 volatile int loop_flag = 1;
+volatile int udp_sock;
 
 void keyboard_int_handler(int);
 void quit_error(char*);
@@ -32,7 +33,6 @@ int main(int argc, char** argv) {
 
     signal(SIGINT, keyboard_int_handler);
 
-    int udp_sock = -1;
     if((udp_sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
         quit_error("Error when creating the socket...\n");
 
@@ -119,6 +119,7 @@ int main(int argc, char** argv) {
 void keyboard_int_handler(int dummy) {
     loop_flag = 0;
     #if INTCLOSE
+        close(udp_sock);
         printf("Quitting...\n");
         exit(0);
     #endif
