@@ -3,6 +3,9 @@
 # Get asterisk's source code
 sudo wget -O /usr/share/asterisk-17.2.tar.gz https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-17.2.0.tar.gz
 
+# Uncompress the sources and remove them right away!
+sudo tar -xvf /usr/share/asterisk-17.2.tar.gz && sudo rm asterisk-17.2.tar.gz
+
 # NOTE: We see how we have the "regular" libraries installed and we are missing the development packages. The two versions are suited
 # to different needs. The regular library offers the compiled libraries so other programs using them that have been already compiled
 # can make the appropriate calls and work as intended. As we want to include the header files themselves we need to have them on our
@@ -108,3 +111,27 @@ sudo wget -O /usr/share/asterisk-17.2.tar.gz https://downloads.asterisk.org/pub/
 
 	# Get libedit -> BSD editline and history libraries
 	sudo apt install -y libedit-dev
+
+	# Get subversion so that you can pull the MP3 source file. We can purge it later on!
+	sudo apt install -y subversion
+
+	# Move to the source directory
+	cd /usr/share/asterisk-17.2.0
+
+	# Get the MP3 sources
+	sudo contrib/scripts/get_mp3_source.sh
+
+	# Get rid of subversion
+	sudo apt -y purge suvbersion
+
+	# Configure the install. You should get an Asterisk logo at the end
+	sudo ./configure
+
+	# Select modules by using make menuselect
+	sudo make menuselect 
+
+	# Time to make it
+	sudo make
+
+	# And if all went well...
+	sudo make install
