@@ -10,6 +10,7 @@
 
 // TODO: Apply loops to packet generation
 // NOTE: Reading from the raw_sock returns the IP Header too!!!!! Parse it out or prevent the socket from returning it all along...
+// NOTE: Quitting with CTRL + C throws an exit code different than 0... Check out why!
 // NOTE: Running the program requires sudo privileges. Otherwise port writes will just fail...
 
 // Echo request anatomy -> https://en.wikipedia.org/wiki/Ping_(networking_utility)
@@ -34,6 +35,7 @@ int compute_checksum(int*, int);
 void generate_icmp_msg(unsigned int*, int);
 int little_to_big_endian(int);
 int ones_complement_16_bit_sum(int, int, char);
+int ones_complement_16_bit_sum_simple(int, int);
 void keyboard_int_handler(int);
 void quit_error(char*);
 
@@ -41,7 +43,7 @@ volatile int continue_pinging = 1;
 
 int main(int argc, char** argv) {
     if (argc != 2) {
-        printf("Use: %s IP", argv[0]);
+        printf("Use: %s IP\n", argv[0]);
         return -1;
     }
     // As seen in RFC 1700, page 8, IANA's Protocol Number for ICMP is 1. This is the protocol discriminator used in IP!
@@ -76,13 +78,13 @@ int compute_checksum(int* arr, int n_elms) {
     int checksum = 0;
     for (int i = 0; i < n_elms; i++)
         for (int mask_shift = 1; mask_shift >= 0; mask_shift--)
-            checksum = ones_complement_16_bit_sum((arr[i] & (0xFFFF << 16 * mask_shift)) >> 16 * mask_shift, checksum, 1);
+            checksum = ones_complement_16_bit_sum_simple((arr[i] & (0xFFFF << 16 * mask_shift)) >> 16 * mask_shift, checksum);
     return (~checksum) & 0xFFFF;
 }
 
 void generate_icmp_msg(unsigned int* msg, int size) {
     char type = 0x08, code = 0x00;
-    int checksum = 0x0000, id = 0x0002, seq_num = 0x0001;
+    int checksum = 0x0000, id = 0x0005, seq_num = 0x000A;
 
     msg[0] = type << 24 | code << 16 | checksum;
     msg[1] = id << 16 | seq_num;
@@ -128,6 +130,17 @@ int ones_complement_16_bit_sum(int x, int y, char recirculate) {
         }
     if (carry && recirculate)
         aux_result = ones_complement_16_bit_sum(aux_result, 1, 0);
+
+    return aux_result & 0xFFFF;
+}
+
+int ones_complement_16_bit_sum_simple(int x, int y) {
+    int aux_result = (x & 0xFFFF) + (y & 0xFFFF);
+
+    // If we had an overflow recirculate the carry!
+    // Max result = 2 * (2^16 - 1) = 2^17 - 2 -> In this case we only need to recirculate the carry once too!
+    if (aux_result >= 0X10000)
+        aux_result++;
 
     return aux_result & 0xFFFF;
 }
