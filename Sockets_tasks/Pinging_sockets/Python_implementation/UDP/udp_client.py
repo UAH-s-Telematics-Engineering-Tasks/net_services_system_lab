@@ -1,5 +1,7 @@
 import socket, sys, re, time, signal
 
+# NOTE: Python "swallows" IPs and hostnames. It'll resolve hostnames automagically just by passign it to the socket!
+
 def main():
     continue_pinging = True
 

@@ -1,5 +1,7 @@
 import socket, sys, time, signal, re
 
+# NOTE: Python "swallows" IPs and hostnames. It'll resolve hostnames automagically just by passign it to the socket!
+
 def main():
     if len(sys.argv) != 3:
         print("Use: {} IP port".format(sys.argv[0]))
