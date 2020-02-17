@@ -53,37 +53,59 @@ Where `xxx` is the input extension. You can then record any files you want and u
 This file helps us define the transport protocol to use as well as *PBX* users:
 
 ```ini
-[transport-udp]
+[transport_udp]
 type = transport
 protocol = udp
 ; Bind (a.k.a listen on) to every interface
 bind = 0.0.0.0
 
-[6001]
+; Config extracted from https://wiki.asterisk.org/wiki/display/AST/Creating+SIP+Accounts
+; Check https://wiki.asterisk.org/wiki/display/AST/PJSIP+Configuration+Sections+and+Relationships for info in user config!
+
+; Templates for the necessary config sections
+
+[endpoint_internal](!)
 type = endpoint
 context = from-internal
 disallow = all
 allow = ulaw
-auth = 6001
-aors = 6001
 
-[6001]
+[auth_userpass](!)
 type = auth
 auth_type = userpass
-password = unsecurepassword
-username = 6001
 
-[6001]
+[aor_dynamic](!)
 type = aor
 max_contacts = 1
+
+; Instantiate those templates. If not overwritten the defaults are inherited!
+
+[spike](endpoint_internal)
+auth = spike_auth
+aors = spike_aor
+[spike_auth](auth_userpass)
+username = spike
+password = spike
+[spike_aor](aor_dynamic)
+
+[jin](endpoint_internal)
+auth = jin_auth
+aors = jin_aor
+[jin_auth](auth_userpass)
+username = jin
+password = jin
+[jin_aor](aor_dynamic)
 ```
 
 A **SIP** client connecting to us should use the following data:
-1. Username -> `6001`
-2. Password -> `unsecurepassword`
+1. Username -> `spike`
+2. Password -> `spike`
 3. Server -> `Asterisk's Host IP`
 
-You should see that the number registers itself automatically.
+You should see that the user registers itself automatically.
 
 ### Making the call
 Depending on your **SIP** client you'll need to make the call in one way or another. I used Android's default phone app and had to manually ask it to use my **SIP** profile rather than the **SIM** card to make any calls. Be sure to be connected to the LAN where your asterisk instance is running!
+
+### Differentiating called number, user and caller ID
+When modifying `pjsip.conf` we are defining the accounts that any given softphone is going to use. We should note that the numbers we make the calls to are actually defined in `extensions.conf` through the so called extension number. That's where we map extension number to registered username. We can also add a caller ID that will be returned to the calling phone as additional info!
