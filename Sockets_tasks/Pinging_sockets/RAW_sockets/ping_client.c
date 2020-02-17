@@ -8,10 +8,13 @@
 #include <errno.h>
 #include <time.h>
 
-// TODO: Apply loops to packet generation
-// NOTE: Reading from the raw_sock returns the IP Header too!!!!! Parse it out or prevent the socket from returning it all along...
+// NOTE: Reading from the raw_sock returns the IP Header too!!!!! Parse it out or prevent the socket from returning it all along if you want to get info like the incoming payload
+    // and the like. I believe you cannot prevent the IP header from being returned though...
+
 // NOTE: Quitting with CTRL + C throws an exit code different than 0... Check out why!
-// NOTE: Running the program requires sudo privileges. Otherwise port writes will just fail...
+
+// NOTE: Running the program requires sudo privileges. Otherwise port writes will just fail as we are using RAW sockets. Investigate linux capabilities to allow the program to use RAW
+    // sockets without requeiring root privileges
 
 // Echo request anatomy -> https://en.wikipedia.org/wiki/Ping_(networking_utility)
 
@@ -31,11 +34,11 @@ Checksum -> Break the entire header into 16-bit chunks taking the checksum to ha
             flip the result.
 */
 
-int compute_checksum(int*, int);
 void generate_icmp_msg(unsigned int*, int);
-int little_to_big_endian(int);
-int ones_complement_16_bit_sum(int, int, char);
+int compute_checksum(int*, int);
 int ones_complement_16_bit_sum_simple(int, int);
+int ones_complement_16_bit_sum(int, int, char);
+int little_to_big_endian(int);
 void keyboard_int_handler(int);
 void quit_error(char*);
 
@@ -59,30 +62,28 @@ int main(int argc, char** argv) {
         quit_error("The provided IP is NOT valid!\n");
 
     unsigned int icmp_msg[6];
+
+    // This function will modify icmp_msg[] as we are passing it by reference
     generate_icmp_msg(icmp_msg, sizeof(icmp_msg));
 
-    unsigned int serv_addr_size = sizeof server_addr;
+    // We need to define a variable containing the structs size as C doesn't like us using &sizeof(serv_addr)...
+    unsigned int serv_addr_size = sizeof(server_addr);
     int curr_time, recv_bytes;
+
+    // Buffer holding the incoming message
     int in_buff[60];
     while(continue_pinging) {
         printf("Sent bytes: %ld", sendto(raw_sock, icmp_msg, sizeof(icmp_msg), 0, (struct sockaddr*) &server_addr, sizeof(server_addr)));
-        recv_bytes = recvfrom(raw_sock, in_buff, sizeof(in_buff), 0, (struct sockaddr*) &server_addr, &serv_addr_size);
-        printf("\tReceived %d bytes from %s\n", recv_bytes, inet_ntoa(server_addr.sin_addr));
-        curr_time = time(NULL);
-        while(time(NULL) - curr_time < 1);
+        printf("\tReceived %ld bytes from %s\n", recvfrom(raw_sock, in_buff, sizeof(in_buff), 0, (struct sockaddr*) &server_addr, &serv_addr_size), inet_ntoa(server_addr.sin_addr));
+        sleep(1);
     }
     close(raw_sock);
     return 0;
 }
 
-int compute_checksum(int* arr, int n_elms) {
-    int checksum = 0;
-    for (int i = 0; i < n_elms; i++)
-        for (int mask_shift = 1; mask_shift >= 0; mask_shift--)
-            checksum = ones_complement_16_bit_sum_simple((arr[i] & (0xFFFF << 16 * mask_shift)) >> 16 * mask_shift, checksum);
-    return (~checksum) & 0xFFFF;
-}
-
+// Generate the entire ICMP header and store it in the buffer pointed to by msg. The codes and the like are explained at the beginning of the source file!
+// We are then configuring a custom payload for testing purposes: "Saiba Samurai!Pc" The real ping client includes the timestamp to compute Round Trip Times
+// and avoid having to store the time it sent each packet! Compliant ping "servers" need to include the payload as is in the replies
 void generate_icmp_msg(unsigned int* msg, int size) {
     char type = 0x08, code = 0x00;
     int checksum = 0x0000, id = 0x0005, seq_num = 0x000A;
@@ -96,21 +97,39 @@ void generate_icmp_msg(unsigned int* msg, int size) {
 
     // Adjust to the network's endianness!
     msg[0] = little_to_big_endian(msg[0] | compute_checksum(msg, 6));
-    msg[1] = little_to_big_endian(msg[1]);
-    msg[2] = little_to_big_endian(msg[2]);
-    msg[3] = little_to_big_endian(msg[3]);
-    msg[4] = little_to_big_endian(msg[4]);
-    msg[5] = little_to_big_endian(msg[5]);
+
+    for (int i = 1; i < size / sizeof(msg[0]); i++)
+        msg[i] = little_to_big_endian(msg[i]);
 }
 
-int little_to_big_endian(int n) {
-    int little_end_bytes[4];
-    for (int i = 0; i < 4; i++)
-        little_end_bytes[i] = (n & (0xFF << i * 8)) >> i * 8;
-
-    return little_end_bytes[0] << 24 | little_end_bytes[1] << 16 | little_end_bytes[2] << 8 | little_end_bytes[3];
+// Function to compute the 16-bit one's complement sum of the inputs as the message is longer than 32-bits...
+// We are just dividing the message in 16-bit chunks and adding them up. Remember the checksum is taken to be
+// 0 when computing it!
+int compute_checksum(int* arr, int n_elms) {
+    int checksum = 0;
+    for (int i = 0; i < n_elms; i++)
+        for (int mask_shift = 1; mask_shift >= 0; mask_shift--)
+            checksum = ones_complement_16_bit_sum_simple((arr[i] & (0xFFFF << 16 * mask_shift)) >> 16 * mask_shift, checksum);
+    return (~checksum) & 0xFFFF;
 }
 
+// Function implementing a 16-bit one's complement addition taking advantage of bit-level masks!
+int ones_complement_16_bit_sum_simple(int x, int y) {
+    int aux_result = (x & 0xFFFF) + (y & 0xFFFF);
+
+    // If we had an overflow recirculate the carry!
+    // Max result = 2 * (2^16 - 1) = 2^17 - 2 -> In this case we only need to recirculate the carry once too!
+    if (aux_result >= 0X10000)
+        aux_result++;
+
+    return aux_result & 0xFFFF;
+}
+
+// Does the same as the above but in a more explicit, bit-level way so that it is clearer how the one's complement
+// sum "works". Even though the function is recursive it will NOT go out of control as if we recirculate the carry
+// in the worst case scenario it will NOT provoke a second carry. That is:
+// 0xFFFF + 0xFFFF will provoke a carry and yield 0xFFFE. When recirculating we'll get the final result 0xFFFF
+// without a second carry recirculation! The above assumes a 16-bit one's complent sum!
 int ones_complement_16_bit_sum(int x, int y, char recirculate) {
     int aux_result = 0, carry = 0, aux_operand = y;
     // If we are just recirculating the carry take into account the offset we apply to the second operand so that
@@ -135,17 +154,19 @@ int ones_complement_16_bit_sum(int x, int y, char recirculate) {
     return aux_result & 0xFFFF;
 }
 
-int ones_complement_16_bit_sum_simple(int x, int y) {
-    int aux_result = (x & 0xFFFF) + (y & 0xFFFF);
+// Function used to convert from my PC's little endian CPU (it's made by Intel) to the network's big endian
+// byte order. We could have maybe used htons() or htonl() for a more portable solution but we wanted to try
+// our hand at writing it ourselves. If using a big endian PC adjust the function above accordingly so as to
+// avoid making the little -> big endian conversion!
+int little_to_big_endian(int n) {
+    int little_end_bytes[4];
+    for (int i = 0; i < 4; i++)
+        little_end_bytes[i] = (n & (0xFF << i * 8)) >> i * 8;
 
-    // If we had an overflow recirculate the carry!
-    // Max result = 2 * (2^16 - 1) = 2^17 - 2 -> In this case we only need to recirculate the carry once too!
-    if (aux_result >= 0X10000)
-        aux_result++;
-
-    return aux_result & 0xFFFF;
+    return little_end_bytes[0] << 24 | little_end_bytes[1] << 16 | little_end_bytes[2] << 8 | little_end_bytes[3];
 }
 
+// Keyboard interrupt (CTRL + C) handler
 void keyboard_int_handler(int dummy) {
     continue_pinging = 0;
     #if INTCLOSE
@@ -154,6 +175,7 @@ void keyboard_int_handler(int dummy) {
     #endif
 }
 
+// Helper function for printing an error message and exiting
 void quit_error(char* err_msg) {
     fprintf(stderr, "%s", err_msg);
     exit(-1);
