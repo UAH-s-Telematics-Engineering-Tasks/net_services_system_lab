@@ -21,6 +21,9 @@ sudo rm /usr/share/asterisk-17.2.tar.gz
 # When running configure the --with-pjproject-bundled option is enbled by default since release 15.0.0! We would need to enable it
 # otherwise!
 
+# Update the repos
+sudo apt update
+
 # Get the essential dependencies. Check: https://wiki.asterisk.org/wiki/display/AST/System+Libraries
 	# Get libjansson -> C library for manipulating JSON data; libjansson4 should be installed!
 	sudo apt install -y libjansson-dev
@@ -98,7 +101,7 @@ sudo rm /usr/share/asterisk-17.2.tar.gz
 	sudo contrib/scripts/get_mp3_source.sh
 
 	# Get rid of subversion
-	sudo apt -y purge suvbersion
+	sudo apt -y purge subversion
 
 	# Configure the install. You should get an Asterisk logo at the end
 	sudo ./configure
