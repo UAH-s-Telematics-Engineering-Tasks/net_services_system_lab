@@ -1,4 +1,5 @@
 # Got it from https://github.com/johannbg/systemd-units/blob/master/projects/asterisk/service/asterisk.service
+# RuntimeDirectory info: https://www.freedesktop.org/software/systemd/man/systemd.exec.html
 [Unit]
 Description=Asterisk PBX And Telephony Daemon
 After=network.target
@@ -6,6 +7,10 @@ After=network.target
 [Service]
 User=asterisk
 Group=asterisk
+# Add directroy /var/run/asterisk owned by the user and group
+# specified in User and Group respectively and delete it on daemon shutdown
+# Note /var/run is just a link to /run!
+RuntimeDirectory=asterisk
 Environment=HOME=/var/lib/asterisk
 WorkingDirectory=/var/lib/asterisk
 ExecStart=/usr/sbin/asterisk -f -C /etc/asterisk/asterisk.conf
