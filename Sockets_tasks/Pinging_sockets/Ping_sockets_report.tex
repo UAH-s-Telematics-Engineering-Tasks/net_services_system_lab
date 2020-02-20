@@ -1,0 +1,1255 @@
+\documentclass[landscape]{article}
+
+\usepackage{minted}
+
+\usepackage{geometry}
+ \geometry{
+ a4paper,
+ %total = {170mm,257mm},
+ left = 15mm,
+ %top = 20mm,
+ }
+
+\title{Ping Sockets Report}
+\author{Pablo Collado Soto}
+\date{}
+
+\begin{document}
+
+    \maketitle
+
+    \section{C Implementation}
+        \subsection{TCP}
+            \subsubsection{Server}
+                \begin{minted}{C}
+// Output functions like printf() and the like
+#include <stdio.h>
+
+// Include everything sockect related
+#include <sys/socket.h>
+
+// POSIX.1 doesn't require these types to be explicitly included
+// We could include them for portability though
+// #include <sys/types.h>
+
+// We'll use memset for clearing the address struct
+#include <string.h>
+
+// Byte order conversion so that we adapt our little endian computer
+// to a big endian network. This is done by functions like htonl()
+#include <arpa/inet.h>
+
+// R/W functions that act on file descriptors
+#include <unistd.h>
+
+// CRTL + C handler for a cleaner exit
+#include <signal.h>
+
+// System calls like exit()
+#include <stdlib.h>
+
+/*
+ * These constants define the length of the buffer we are reading into
+ * and the number of incoming connections we can simultaneously keep
+ * in the input queue respectively
+ */
+#define BUFF_SIZE 65
+#define QUEUE_LEN 5
+
+// This flag is altered by the CTRL + C handler to trigger the program's exit
+volatile int loop_flag = 1;
+
+// Auxiliary function prototypes. The definitions can be found after main()
+void keyboard_int_handler(int);
+void quit_error(char*);
+
+int main(int argc, char** argv) {
+    // Check we only received 1 parameter: the port to bind the server to
+    if (argc != 2) {
+        fprintf(stderr, "Use: %s port\n", argv[0]);
+        return -1;
+    }
+
+    // We have used compile time flags to alter the programs vervosity!
+    #if DBG
+    printf("Proceeding with port: %s\n", argv[1]);
+    #endif
+
+    /*
+        Attach the keyboard_int_handler() function to the CTRL + C (SIGINT) signal
+        That is, CTRL + C willbe handled by keyboard_int_handler()
+    */
+    signal(SIGINT, keyboard_int_handler);
+
+    /*
+        Forward declaration of used variables.
+        The buffers are used to handle the incoming messages
+    */
+    int seq_number = 0, tcp_sock, client_fd, read_bytes = 0;
+    char buffer[BUFF_SIZE] = {0}, backup_buffer[BUFF_SIZE] = {0};
+
+    /*
+        AF_INET -> IPv4 socket
+        SOCK_STREAM -> Connection Oriented Socket
+        0 -> Use TCP as the transport protol. We have no other option though!
+        Returns: (int) file descriptor to the newly created socket. Returns -1 on error
+    */
+    if((tcp_sock = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+        quit_error("Error creating the socket... Aborting!\n");
+
+    #if DBG
+    printf("Created the socket!\n");
+    #endif
+
+    /*
+        Let's build our address structure. As seen in 'man ip.7' we need to define a sockaddr_in struct for IPv4 sockets!
+        client_sock will contain the client's data when we accept a connection as we'll see later on
+    */
+    struct sockaddr_in sock_conf, client_sock;
+
+    /*
+        Zero out the entire struct
+        These are not strictly necessary as we'll initialize every field within the structs
+        It's a common practice though and it can potentially avoid looking for "ghost" errors...
+    */
+    memset(&sock_conf, 0, sizeof(struct sockaddr_in));
+    memset(&client_sock, 0, sizeof(struct sockaddr_in));
+
+    // Set the socket family. AF_INET == IPv4
+    sock_conf.sin_family = AF_INET;
+
+    /*
+        Set the port number from the passed argument converted to network byte order
+        We are using htonl() because atoi() returns an int (not a short) data type
+        We are then casting it to the type shown in man 1p.7 (a.k.a in_port_t) to be
+        as correct as possible even though it's not strictly necessary. We could also
+        use, as seen, htons() as port numbers are represented by 16-bit numbers only!
+        This would truncate a higher value to a correct one or so we pressume, we would
+        need to take a look at the implementation... Anyhow, the main idea is we need to
+        be aware of the data endianness when writing data that's ultimtely going to travel
+        through the network. We tried both versions out of curiosity and both seem to be
+        working perfectly fine
+    */
+    #if DBG
+    int port = atoi(argv[1]);
+    sock_conf.sin_port = htons(port);
+    #else
+    sock_conf.sin_port = (in_port_t) htonl(atoi(argv[1]));
+    #endif
+
+    /*
+        Listen on the loopback interface "lo". Take care of setting the correct endiannes!
+    */
+    sock_conf.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    #if DBG
+    printf("Server address: %s:%d\n", inet_ntoa(sock_conf.sin_addr), ntohs(sock_conf.sin_port));
+    #endif
+
+    /*
+        Ready to bind using the data we have configured in the sock_conf struct.
+        In order to comply with the function prototype seen in man bind.2 we need
+        to cast the pointer to the sock_conf address to a pointer to a sockaddr struct.
+        The sole purpose of casting to sockaddr is avoiding compiler warnings as seen
+        in man bind.2
+    */
+    if (bind(tcp_sock, (struct sockaddr*) &sock_conf, sizeof(struct sockaddr_in)))
+        quit_error("Error when binding...\n");
+
+    #if DBG
+    printf("Binded the socket!\n");
+    #endif
+
+    // Start listening for connections on the socket
+    if (listen(tcp_sock, QUEUE_LEN))
+        quit_error("Error when trying to listen...\n");
+
+    #if DBG
+    printf("Hush! We are listening!\n");
+    #endif
+
+    /*
+        Calling accept will block the caller (main() in this case) until we have a connection
+        to extract from the queue. The program will continue running after accepting said connection.
+
+        Listening sockets are blocking by default in the sense that calls to accept()
+        involving this passive socket will block the caller until a connection is present.
+        This implies we'll be blocked if the queue is empty and we'll extract queued
+        connections otherwise! We just need to run an infinite loop getting those clientes
+        but before that we need to define a structure for getting the client's info! Note
+        that an empty constant defaults to a non-zero value as found in C's standard; that's
+        why for (;;) is an infinite loop but we prefer the more classic and simpler while (1);
+    */
+
+    // We need to declare an int containing the size of the sockets or else we won't be able to get the desired address with the & operator...
+    long int client_sock_size = sizeof(struct sockaddr_in);
+
+    /*
+        We are passing the client_sock struct so that it is filled up with info describing the new client
+        We also need to cast some types here (like socklen_t) to comply with the prototypes... This one
+        can be found at man accept.2
+    */
+    if ((client_fd = accept(tcp_sock, (struct sockaddr*) &client_sock, (socklen_t *) &client_sock_size)) == -1)
+            quit_error("Error when accepting the connection...\n");
+
+    #if DBG
+    printf("Connected to: %s:%d. Loop time!\n", inet_ntoa(client_sock.sin_addr), ntohs(client_sock.sin_port));
+    #endif
+
+    while(loop_flag) {
+        // If we read 0 bytes then assume the client has closed the connection and set the exit flag appropriately
+        if ((read_bytes = read(client_fd, buffer, BUFF_SIZE)) > 0)
+            while(read_bytes < sizeof("Echo request")) {
+                read_bytes += read(client_fd, backup_buffer, BUFF_SIZE);
+                strcat(buffer, backup_buffer);
+            }
+        else
+            loop_flag = 0;
+
+        #if DBG
+        printf("Received %d bytes! Message: %s\n", read_bytes, buffer);
+        #endif
+
+        // Increment the sequence number with every new message
+        seq_number += 1;
+
+        /*
+            Craft the messages into the backup_buffer. As we have the entire message at "buffer"
+            we can reuse the backup one so that we don't need to define a third one to store
+            our response message
+        */
+        sprintf(backup_buffer, "Echo reply # %d", seq_number);
+
+        if (!strcmp("Echo request", buffer)) {
+            #if DBG
+            printf("Received an echo request!\n");
+            #endif
+            /*
+                Send the reply to the client. If we cannot write to the socket quit. Write returns -1 on error as seen
+                on man write.2
+            */
+            if(write(client_fd, backup_buffer, sizeof(backup_buffer)) == -1)
+                loop_flag = 0;
+        }
+        #if DBG
+        /*
+            The following has been mainly used for debugging purposes. inet_ntoa() translates an incoming
+            IP address to a string that's easier to handle. ntohs converts network byte order to the one
+            used by the host. In our case the conversion is from big endian to little endian
+        */
+        else
+            printf("Received a weird message from: %s:%d\n", inet_ntoa(client_sock.sin_addr), ntohs(client_sock.sin_port));
+        #endif
+    }
+    #if DBG
+    printf("Client disconnected!\n");
+    #endif
+    // Close both sockets and exit
+    close(client_fd);
+    close(tcp_sock);
+    return 0;
+}
+
+/*
+    CTRL + C handler
+    We need to define a dummy variable as these handlers are passed a parameter
+    the thing is we won't be using it for anything. We still need to avoid compiler
+    warnings... This just sets the appropriate flag to exit the main loop.
+*/
+void keyboard_int_handler(int dummy) {
+    loop_flag = 0;
+    #if INTCLOSE
+    printf("Quitting...\n");
+    exit(0);
+    #endif
+}
+
+/*
+    Helper function for exiting in case of error and printing a message in the process.
+*/
+void quit_error(char* err_msg) {
+    fprintf(stderr, "%s", err_msg);
+    exit(-1);
+}
+                \end{minted}
+
+            \subsubsection{Client}
+                \begin{minted}{C}
+/*
+    We'll only stop ourselves on the aspects we haven't touched on in previous
+    source files so as not to drag things on unnecessarily
+*/
+
+#include <stdio.h>
+#include <sys/socket.h>
+#include <string.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <errno.h>
+
+/*
+    Let's us get the current time through time() so as not
+    to overwhelm the server with too many messages by
+    introducing a delay
+*/
+#include <time.h>
+
+/*
+    Lets us make a DNS resolution through gethostbyname()
+*/
+#include <netdb.h>
+
+#define BUFF_SIZE 64
+
+void keyboard_int_handler(int);
+void quit_error(char*);
+
+volatile int continue_pinging = 1;
+
+int main(int argc, char** argv) {
+    if(argc != 3) {
+        fprintf(stderr, "Use: %s  IP | hostname port\n", argv[0]);
+        return -1;
+    }
+
+    #if DBG
+    printf("Proceeding with: %s:%s\n", argv[1], argv[2]);
+    #endif
+
+    signal(SIGINT, keyboard_int_handler);
+
+    int tcp_sock = 0;
+    // Create a TCP socket
+    if((tcp_sock = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+        quit_error("Error creating the socket... Good bye!\n");
+
+    #if DBG
+    printf("Created the client socket!\n");
+    #endif
+
+    /*
+        No need to bind the socket, we can get a random port number!
+    */
+
+    /*
+        We'll configure serv_addr so that it contains the necessary information
+        to connect to the desired server
+    */
+    struct sockaddr_in serv_addr;
+
+    memset(&serv_addr, 0, sizeof serv_addr);
+
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(atoi(argv[2]));
+    /*
+        Function gethostbyname() accepts either an IP address or a hostname as an input in the
+        form of a string (that is, a char*) and returns the address of a hostent structure. We
+        can find an array of pointers to structs containing information relative to the obtained IP
+        within this hostent. The address of this first pointer is stored in the h_addr_list memeber,
+        so gethostbyname()->h_addr_list is the pointer to a pointer to a struct containing the end
+        host's IP address. We can get the pointer to said struct by accessing:
+        gethostbyname->h_addr_list[0] so the only thing there's left for us to do is dereference this
+        pointer. Before doing so we'll cast it to a pointer to an structure of type in_addr
+        (remember we cannot cast to a struct type in C (i.e. we cannot do (struct in_addr foo)))
+        which is the one our serv_addr.sin_addr member expects. After applying the dereference operator
+        * we have all we need! We should point out that if we provide an IP instead of a hostname to
+        gethostyname() it'll just copy that address to this struct we are looking for so we don't need
+        to check we are in fact passing a host name to the function. That's quite handy!
+
+        All this info can be found in man gethostbyname
+    */
+    serv_addr.sin_addr = *((struct in_addr*) gethostbyname(argv[1])->h_addr_list[0]);
+
+    // Previous code before using gethostbyname()
+    // // The call to inet_aton() already updates the contents of the struct!
+    // if(!inet_aton(argv[1], &serv_addr.sin_addr))
+    //     quit_error("The provided IP address is NOT valid!\n");
+
+    #if DBG
+    printf("Server address: %s:%d\n", inet_ntoa(serv_addr.sin_addr), ntohs(serv_addr.sin_port));
+    #endif
+
+    // Connect to the configured server socket
+    if(connect(tcp_sock, (struct sockaddr*) &serv_addr, sizeof(struct sockaddr_in)))
+        quit_error("Couldn't connect...\n");
+
+    #if DBG
+    printf("Connected to the server!\n");
+    #endif
+
+    // Forward declaration of used variables
+    char in_buffer[BUFF_SIZE] = {0}, aux_buffer[BUFF_SIZE] = {0};
+
+    int curr_time = 0, recv_bytes = 0, last_seq_number = 0;
+    while(continue_pinging) {
+        // Send the ping request
+        if(write(tcp_sock, "Echo request", sizeof "Echo request") == -1)
+            continue_pinging = 0;
+
+        /*
+            If we are filling up our buffer we could have more message to read
+            We'll do so while we continue filling it up. If we read 0 bytes
+            we've reached the End Of File and will then close the connection
+        */
+        if((recv_bytes = read(tcp_sock, in_buffer, BUFF_SIZE)) == BUFF_SIZE)
+            while(read(tcp_sock, aux_buffer, BUFF_SIZE) == BUFF_SIZE)
+                strcat(in_buffer, aux_buffer);
+        else if (!recv_bytes)
+            continue_pinging = 0;
+
+        /*
+            Look for the sequence number within the incoming message to check whether
+            we got a new message. Function strpbrk() returns a pointer to the first character
+            in in_buffer appearing in "0123456789" (i.e. a pointer to the first digit in in_buffer)
+            As we know our server appends the sequence number to the responses, that is, it adds
+            it at the end we can take advantage of NULL ('\0') terminated strings in C so that we
+            only read the number if we begin reading from the position returned by strpbrk() 
+        */
+        if(last_seq_number < atoi(strpbrk(in_buffer, "0123456789"))) {
+            last_seq_number = atoi(strpbrk(in_buffer, "0123456789"));
+            printf("Got reply: %s\n", in_buffer);
+        }
+
+        /*
+            We didn't know there was a simpler sleep() function so we read the time (in seconds)
+            with the time() function and waited for a second doing nothing so as not to overwhelm
+            the server with too many requests
+        */
+        curr_time = time(NULL);
+        while(time(NULL) - curr_time < 1);
+    }
+    #ifdef DBG
+    printf("Closing the connection!\n");
+    #endif
+    // Exit and clean up the socket
+    close(tcp_sock);
+    return 0;
+}
+
+void keyboard_int_handler(int dummy) {
+    continue_pinging = 0;
+    #if INTCLOSE
+    printf("Quitting...\n");
+    exit(0);
+    #endif
+}
+
+void quit_error(char* err_msg) {
+    fprintf(stderr, "%s", err_msg);
+    exit(-1);
+}
+                \end{minted}
+        \subsection{UDP}
+            \subsubsection{Server}
+                \begin{minted}{C}
+/*
+    We'll only comment on the things we haven't gone through on previous source files
+    so as not to drag things on unnecessarily
+*/
+
+#include <stdio.h>
+#include <sys/socket.h>
+#include <string.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <signal.h>
+#include <stdlib.h>
+
+#define BUFF_SIZE 65
+#define CLIENT_SIZE 10
+
+/*
+    This struct let's us concurrently handle many users keeping separate sequence numbers.
+    Each new client is associated with once struct which keeps track of its current sequence
+    number. We have hardcoded an array holding up to CLIENT_SIZE elements but we could
+    theoretically implement this mechanismi with dynamica memory procedures (i.e malloc())
+    to handle as many clients as our hardware is capable of
+*/
+struct client_echo {
+    unsigned int ip_addr;
+    unsigned int port;
+    int seq_number;
+};
+
+volatile int loop_flag = 1;
+
+/*
+    Declaring the soocket's file desriptor here let's us close it from the
+    CTRL + C handler in an easier way!
+*/
+volatile int udp_sock;
+
+void keyboard_int_handler(int);
+void quit_error(char*);
+
+int main(int argc, char** argv) {
+    if (argc != 2) {
+        fprintf(stderr, "Use: %s port\n", argv[0]);
+        return -1;
+    }
+
+    #if DBG
+        printf("Proceeding with port: %s\n", argv[1]);
+    #endif
+
+    signal(SIGINT, keyboard_int_handler);
+
+    /*
+        Create a UDP (SOCK_DGRAM) socket!
+    */
+    if((udp_sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+        quit_error("Error when creating the socket...\n");
+
+    #if DBG
+        printf("The socket is up!\n");
+    #endif
+
+    struct sockaddr_in sock_conf, client_data;
+    unsigned int addr_struct_size = sizeof(client_data);
+
+    // Not really necessary as we are initializing everything...
+    // memset(&sock_conf, 0, sizeof(struct sockaddr_in));
+
+    sock_conf.sin_family = AF_INET;
+    sock_conf.sin_port = htons(atoi(argv[1]));
+    sock_conf.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    #if DBG
+        printf("Socket settings\n\tIP: %s\tPORT: %d\n", inet_ntoa(sock_conf.sin_addr), ntohs(sock_conf.sin_port));
+    #endif
+
+    if(bind(udp_sock, (struct sockaddr*) &sock_conf, sizeof(struct sockaddr_in)))
+        quit_error("Error when binding Mr. Socket...\n");
+
+    #if DBG
+        printf("Binded the socket correctly!\n");
+        printf("Let's get some data!\n");
+    #endif
+
+    char in_buffer[BUFF_SIZE] = {0}, backup_buffer[BUFF_SIZE] = {0};
+    int read_bytes = 0;
+    struct client_echo client_id[CLIENT_SIZE];
+
+    // Initialize the client_id array containing info iding each client
+    for (int i = 0; i < CLIENT_SIZE; i++) {
+        client_id[i].ip_addr = -1;
+        client_id[i].port = -1;
+        client_id[i].seq_number = 0;
+    }
+
+    int k = 0;
+
+    // Begin serving clients!
+    while(loop_flag) {
+        /*
+            Read the info into in_buffer. Continue reading if we didn't get a full request and join the message int in_buffer
+            by calling strcat() for concatenating both the main and backup buffers. It is utterly important to record the
+            client's info into client_data as we need it to find out this clien't sequence number...
+        */
+        if((read_bytes = recvfrom(udp_sock, in_buffer, BUFF_SIZE, 0, (struct sockaddr*) &client_data, &addr_struct_size)) > 0)
+            while(read_bytes < sizeof("Echo request")) {
+                read_bytes += recvfrom(udp_sock, in_buffer, BUFF_SIZE, 0, (struct sockaddr*) &client_data, &addr_struct_size);
+                strcat(in_buffer, backup_buffer);
+            }
+        else
+            loop_flag = 0;
+
+        for (k = 0; k < CLIENT_SIZE; k++) {
+            // If it's not a new client increment the sequence number and stop reading the array
+            if(client_id[k].ip_addr == client_data.sin_addr.s_addr && client_id[k].port == client_data.sin_port) {
+                client_id[k].seq_number += 1;
+                break;
+            }
+            /*
+                If it's a new client initialize a new struct
+                That's why initializing the array was really important!
+            */
+            else if (client_id[k].ip_addr == -1) {
+                client_id[k].ip_addr = client_data.sin_addr.s_addr;
+                client_id[k].port = client_data.sin_port;
+                break;
+            }
+        }
+
+        #if DBG
+            printf("Message from: %s:%d\n\tContent: %s\n", inet_ntoa(client_data.sin_addr), ntohs(client_data.sin_port), in_buffer);
+        #endif
+        // Build the echo reply by reusing the backup buffer. Recycling is a must!
+        sprintf(backup_buffer, "Echo reply # %d", client_id[k].seq_number);
+        
+        /*
+            Send the reply to the client. If we cannot write to the socket quit. Write returns -1 on error as seen
+            on man write.2
+        */
+        if(!strcmp(in_buffer, "Echo request")) {
+            if(sendto(udp_sock, backup_buffer, BUFF_SIZE, 0, (struct sockaddr*) &client_data, addr_struct_size) == -1)
+                loop_flag = 0;
+        }
+        #if DBG
+        else
+            printf("Got a weird message...\n");
+        #endif
+    }
+    #if DBG
+        printf("Client disconnected or no more data to read!\n");
+    #endif
+    close(udp_sock);
+    return 0;
+}
+
+void keyboard_int_handler(int dummy) {
+    loop_flag = 0;
+    #if INTCLOSE
+        close(udp_sock);
+        printf("Quitting...\n");
+        exit(0);
+    #endif
+}
+
+void quit_error(char* err_msg) {
+    fprintf(stderr, "%s", err_msg);
+    exit(-1);
+}
+                \end{minted}
+            \subsubsection{Client}
+                \begin{minted}{c}
+#include <stdio.h>
+#include <sys/socket.h>
+#include <string.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <time.h>
+#include <netdb.h>
+
+#define BUFF_SIZE 64
+
+void keyboard_int_handler(int);
+void quit_error(char*);
+
+volatile int continue_pinging = 1;
+volatile int udp_sock;
+
+int main(int argc, char** argv) {
+    if (argc != 3) {
+        fprintf(stderr, "Use: %s  IP | hostname port\n", argv[0]);
+        return -1;
+    }
+
+    #ifdef DBG
+        printf("Proceeding with: %s:%s\n", argv[1], argv[2]);
+    #endif
+
+    signal(SIGINT, keyboard_int_handler);
+
+    if ((udp_sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+        quit_error("Couldn't create the socket...\n");
+
+    #ifdef DBG
+        printf("Created the client socket!\n");
+    #endif
+
+    struct sockaddr_in server_addr;
+    unsigned int serv_addr_size = sizeof server_addr;
+
+    // Configure the struct  "pointing to" the server we are ging to talk to
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(atoi(argv[2]));
+
+    // Resolve the provided hostname through gethostbyname()
+    server_addr.sin_addr = *((struct in_addr*) gethostbyname(argv[1])->h_addr_list[0]);
+
+    /*
+        Note inet_ntoa() has a statically allocated buffer "inside" and thus subsequent calls to inet_ntoa() overwrite said buffer.
+        We would need to malloc() space or define a char array otherwise...
+    */
+    #ifdef DBG
+        printf("Server is @:\n\tIP: %s\tPORT: %d\n", inet_ntoa(server_addr.sin_addr), ntohs(server_addr.sin_port));
+    #endif
+
+    char in_buffer[BUFF_SIZE] = {0};
+    int curr_time = 0, recv_bytes = 0, last_seq_number = -1;
+    while (continue_pinging) {
+        /*
+            Send the echo request to the server we have configured through the server_addr struct. If there is an error
+            (write() returns -1) exit the while loop.
+        */
+        if(sendto(udp_sock, "Echo request", sizeof "Echo request", 0, (struct sockaddr*) &server_addr, sizeof server_addr) == -1)
+            break;
+
+        /*
+            Receive the reply. The call to recvfrom() is blocking in the sense we will be stuck here until we receive something.
+            In case of reaching the EOF recvfrom() will return 0. In case or error it'll return -1.
+        */
+        if((recv_bytes = recvfrom(udp_sock, in_buffer, BUFF_SIZE, 0, (struct sockaddr*) &server_addr, &serv_addr_size)) <= 0)
+            break;
+
+        // Look for the sequence number in the incoming reply
+        if(last_seq_number < atoi(strpbrk(in_buffer, "0123456789"))) {
+            last_seq_number = atoi(strpbrk(in_buffer, "0123456789"));
+            printf("Got reply: %s\n", in_buffer);
+        }
+
+        // Introduce a 1 second delay
+        curr_time = time(NULL);
+        while(time(NULL) - curr_time < 2);
+    }
+    #ifdef DBG
+        printf("Tearing down...\n");
+    #endif
+    close(udp_sock);
+    return 0;
+}
+
+void keyboard_int_handler(int dummy) {
+    continue_pinging = 0;
+    #if INTCLOSE
+        close(udp_sock);
+        printf("Quitting...\n");
+        exit(0);
+    #endif
+}
+
+void quit_error(char* err_msg) {
+    fprintf(stderr, "%s", err_msg);
+    exit(-1);
+}
+                \end{minted}
+
+    \section{Python Implementation}
+        \subsection{TCP}
+            \subsubsection{Server}
+                \begin{minted}{python}
+# Imports:
+    # socket -> Facilities for socket creation
+    # threading -> Utilities to emply threads for parallel programming
+    # sys -> Allow access to the arguments passed from the shell
+    # signal -> Lets us use handlers for signals like CTRL + C
+
+import socket, threading, sys, signal
+
+# Global variables accessed by several threads.
+# simul_users keeps track of concurrent users
+# thread_kill is a "flag" variable used to make
+# every running thread terminate so that we can
+# cleanly exit the program!
+simul_users = 0
+thread_kill = False
+
+# This function will be launched to handle every new client connecting to us
+def client_connection (c_socket, addr):
+    # Decalre simul_users as global so that we can change it from within the function
+    global simul_users
+
+    # Increment the number of simultaneous users
+    simul_users += 1
+
+    # Initialize a sequence number for the current user/connection
+    seq_number = 0
+    print("Thread started for: {}:{}".format(addr[0], addr[1]))
+
+    # Continue executing until we try to exit and have to terminate every thread
+    while not thread_kill:
+        # The socket is blocking by default so we will stay here until we receive a message
+        # recv() returns the read message as a python bytes object which we need to
+        # decode if we want to use it as a string later on...
+        # 2048 specifies the maximum data to receive at once, i.e, the buffer size
+        message = c_socket.recv(2048).decode()
+
+        # If we cannot read any more data recv() will return an empty string ('')
+        # That's our time to disconnect the client! We just need to disconnect the socket
+        # and update the number of simultaneous users. Returning from this function will
+        # implicitly kill the thread that was running it so we don't need to be all
+        # that concerced about housekeeping...
+        if message == '':
+            print('Client {}:{} disconnected...'.format(addr[0], addr[1]))
+            simul_users -= 1
+            c_socket.close()
+            return
+        elif message == "Echo request":
+            # If we got an echo reply increment the sequence number and send the message.
+            # Note how we have to encode() it to convert the string into a bytes object
+            # which is what sockets know how to handle. We are also capturing every
+            # exception that can be triggered by writing to the client socket and
+            # disconnecting it in case we experienced an error. This is done, as shown
+            # with the help of a try/except block
+            seq_number += 1
+            try:
+                c_socket.send("Echo reply # {}".format(seq_number).encode())
+            except:
+                print("Socket closed!")
+                simul_users -= 1
+                c_socket.close()
+                return
+
+def main():
+    # Check we were only passed a parameter, the port number to bind to
+    if len(sys.argv) != 2:
+        print("Use: {} port".format(sys.argv[0]))
+        exit(-1)
+
+    # Define a list containing the several thread objects we'll be creating
+    threads = []
+
+    # Instantiate a socket with the following characteristics:
+        # socket.AF_INET -> IPv4
+        # socket.SOCK_STREAM -> TCP @ the transport layer
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    # This function is here so that it 'sees' server_socket to be able to close it!
+    def k_int_handler(foo, fuu):
+        # We need to define thread_kill as global to be able to modify it like before!
+        global thread_kill
+
+        # Set the flag to force every thread to exit
+        thread_kill = True
+        print("Shutting down!")
+
+        # Wait until all threads do in fact finish
+        for thread in threads:
+            thread.join()
+
+        # Close the socket and call it a day
+        server_socket.close()
+        exit(0)
+
+    # Bind the above handler to the SIGINT (CTRL + C) signal
+    signal.signal(signal.SIGINT, k_int_handler)
+
+    # Bind the socket to the localhost ('127.0.0.1') interface on the provided port
+    # We don't have to deal with endiannes conversion like before!
+    # Use server_socket.bind('', int(sys.argv[1])) to allow outside connections!
+    # '' == sock.INADDR_ANY -> Bind to every interface!
+    server_socket.bind(('127.0.0.1', int(sys.argv[1])))
+
+    # Begin accepting connections. Calling listen() will block us until we get a
+    # new connection. The passed parameter tells the socket to only keep one client
+    # in a queue and reject all the other connections. As we are using threads to handle
+    # the clients we'll see how this will only happen if we get a load of simultaneous
+    # connections, we expect this queue to be empty most of the time!
+    server_socket.listen(1)
+
+    print("Ready for connections!")
+
+    while True:
+        # Note this info will only be updated on screen when we get a new connection.
+        # We should include it in several parts of the client handler (client_connection)
+        # but we didn't want to bloat the code with print()s...
+        print("Number of active connections: %d" % (simul_users))
+
+         # Wait here until you get a new connection! Upon acceptance, accept() will
+         # return a connected socket to the client DIFFERENT than the one we accepted
+         # the connection on as well as his/her IP and port number
+        connection_socket, client_addr = server_socket.accept()
+
+        # Create a new thread and add it to our threads list. We need to tell the
+        # constructor that the thread will run the client_connection() function and
+        # we will be passing it parameters connection_socket and client_addr when it's
+        # started. Note these parameters are passed inside a tuple
+        threads.append(threading.Thread(target = client_connection, args = (connection_socket, client_addr)))
+
+        # Print some interesting info
+        print("# of created threads: {}".format(len(threads)))
+
+        # Start the new thread. Note that index -1 in python yields the last element of
+        # the indexed list
+        threads[-1].start()
+
+# Launch main() if we are running the script directly, i.e, if we executed python3 udp_server.py 1234 or the like
+if __name__ == "__main__":
+    main()
+                \end{minted}
+
+            \subsubsection{Client}
+                \begin{minted}{python}
+# Imports:
+    # re -> Use regular expressions when finding the sequence number
+    # time -> Allow introducing a delay so as not to overwhelm the server
+    # The rest have been explained elsewhere!
+
+import socket, sys, time, signal, re
+
+# NOTE: Python "swallows" IPs and hostnames. It'll resolve hostnames automagically just by passign it to the socket!
+# NOTE: Whatever happened to gethostbyname()...
+
+def main():
+    # Check we received 2 parameters: The server's IP and port
+    if len(sys.argv) != 3:
+        print("Use: {} IP port".format(sys.argv[0]))
+        exit(-1)
+
+    # Validate the first argument is indeed an IP address through regular expressions. If we want to use symbolic names like 'localhost' we need to comment
+    # it out or else the program will exit... The if clause takes advantage of the fact that match() returns None if it couldn't find any matches and an
+    # object otherwise which is just what we need to know as None is treated in the same way as false when used as a condition
+    if not re.match(r'(\d{1,2}|1\d\d|2[0-4]\d|255)\.(\d{1,2}|1\d\d|2[0-4]\d|255)\.(\d{1,2}|1\d\d|2[0-4]\d|255)\.(\d{1,2}|1\d\d|2[0-4]\d|255)$', sys.argv[1]):
+        print("The provided IP address is NOT valid!")
+        exit(-1)
+
+    # Instantiate a TCP socket
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    # Define an exit handler
+    def k_int_handler(foo, fuu):
+        print("Quitting!")
+        client_socket.close()
+        exit(0)
+
+    # Bind the avobe handler to CTRL + C
+    signal.signal(signal.SIGINT, k_int_handler)
+
+    # Try to connect to the server. Note the address we need to provide is a tuple
+    # Containing the server's IP and Port unmber. If the server is not reachable
+    # (i.e it's not running) connect() will throw an exception and exit. We could use
+    # a tr/except block to catcch it and handle the situation to make it wait until it
+    # finds a server for example but we believe it adds nothing to what we want to achieve!
+    client_socket.connect((sys.argv[1], int(sys.argv[2])))
+
+    while True:
+        # We'll later see when using UDP at the transport layer how we also need to
+        # specify a recipient address. This is not the case with TCP as it's a
+        # connection oriented protocol!
+        client_socket.send("Echo request".encode())
+
+        # geat a message and decode it!
+        in_msg = client_socket.recv(2048).decode()
+
+        # If we cannot read any more data recv() will return an empty string ('')
+        # That's our time to exit! Note how we need to provide two dummy parameters
+        # for the exit handler...
+        if in_msg == '':
+            k_int_handler(None, None)
+        
+        # Find the incoming sequence number with a regular expression ('\d+') and
+        # print an status message
+        print("Echo reply # {}".format(re.findall(r'\d+', in_msg)[0]))
+
+        # Stay idle for a second so that the server doesn't go nuts!
+        time.sleep(1)
+
+if __name__ == "__main__":
+    main()
+                \end{minted}
+
+        \subsection{UDP}
+            \subsubsection{Server}
+                \begin{minted}{python}
+# These imports have been already explained before!
+import socket, sys, signal
+
+def main():
+    # Check we were passed just 1 argument, the port number to bind to!
+    if len(sys.argv) != 2:
+        print("Use: {} port".format(sys.argv[0]))
+        exit(-1)
+
+    # Instantiate a socket with the following characteristics:
+        # socket.AF_INET -> IPv4
+        # socket.SOCK_DGRAM -> UDP @ the transport layer
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    # Handler for exiting the program and cleaning up
+    # We have defined it here so as to have access to server_socket
+    # so that we can close it appropriately. These handlers are passed
+    # 2 parameters which we won't use but we need to include them
+    # as python won't know how to handle the situation otherwise...
+    def k_int_handler(foo, fuu):
+        print("Shutting down!")
+        server_socket.close()
+        exit(0)
+
+    # Bind the above handler to the SIGINT (CTRL + C) signal
+    signal.signal(signal.SIGINT, k_int_handler)
+
+    # Bind the socket to the localhost ('127.0.0.1') interface on the provided port
+    # We don't have to deal with endiannes conversion like before!
+    server_socket.bind(('127.0.0.1', int(sys.argv[1])))
+
+    print("Server ready!")
+    # Define the dictionary that'll let us map an incoming message's IP to a given sequence number
+    # The index will be a messages source IP and the value will be the corresponding sequence number
+    # Hence, a dictionary with only one entry would look like:
+        # {'1192.168.1.35': 0}
+    proc_2_seq_num = {}
+    while True:
+        # The socket is blocking by default so we will stay here until we receive a message
+        # recvfrom() returns the read message and a tuple containing the messages source address
+        # as well as the source port number: (source_ip, source_port)
+        # 2048 specifies the maximum data to receive at once, i.e, the buffer size
+        message, source_addr = server_socket.recvfrom(2048)
+
+        # Messages returned by recvfrom() and friends are Python bytes objects that need to be
+        # decoded to be handled like strings!
+        if message.decode() == "Echo request":
+            # Check wheteher the source IP is new!
+            if not source_addr in proc_2_seq_num:
+                # If it us, add a new entry to proc_2_se_num
+                proc_2_seq_num[source_addr] = 0
+
+            # Otherwise just increment it
+            proc_2_seq_num[source_addr] += 1
+
+            # Send back the reply. Note that just like we decoded the incoming message we need to encode the
+            # string we are sending back, converting it into a bytes object in the process which is what
+            # socket objects know how to deal with
+            server_socket.sendto("Echo reply # {}".format(proc_2_seq_num[source_addr]).encode(), source_addr)
+
+# Launch main() if we are running the script directly, i.e, if we executed python3 udp_server.py 1234 or the like
+if __name__ == "__main__":
+    main()
+                \end{minted}
+
+            \subsubsection{Client}
+                \begin{minted}{python}
+# All these imports have been explained elsewhere!
+import socket, sys, re, time, signal
+
+def main():
+    # Check we received 2 parameters: The server's IP and port
+    if len(sys.argv) != 3:
+        print("Use: {} IP port".format(sys.argv[0]))
+        exit(-1)
+
+    # Validate the first argument is indeed an IP address through regular expressions. If we want to use symbolic names like 'localhost' we need to comment
+    # it out or else the program will exit... The if clause takes advantage of the fact that match() returns None if it couldn't find any matches and an
+    # object otherwise which is just what we need to know as None is treated in the same way as false when used as a condition
+    if not re.match(r'(\d{1,2}|1\d\d|2[0-4]\d|255)\.(\d{1,2}|1\d\d|2[0-4]\d|255)\.(\d{1,2}|1\d\d|2[0-4]\d|255)\.(\d{1,2}|1\d\d|2[0-4]\d|255)$', sys.argv[1]):
+        print("The provided IP address is NOT valid!")
+        exit(-1)
+
+    # Instantiate a UDP socket
+    client_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    # Define an exit handler
+    def k_int_handler(foo, fuu):
+        print("Quitting!")
+        client_sock.close()
+        exit(0)
+
+    # Bind the handler to CTRL + C
+    signal.signal(signal.SIGINT, k_int_handler)
+
+    while True:
+        # Send a message to the server
+        client_sock.sendto("Echo request".encode(), (sys.argv[1], int(sys.argv[2])))
+
+        # Block until you get the reply
+        in_msg, server_addr = client_sock.recvfrom(2048)
+
+        # Decode it and find the sequence number with a regular expression ('\d+')
+        # Print a pretty message with all that info
+        print("Echo reply # {}".format(re.findall(r'\d+', in_msg.decode())[0]))
+
+        # Stay idle for a second so that the server doesn't go nuts!
+        time.sleep(1)
+
+# If the script is run directly execute main()
+if __name__ == "__main__":
+    main()
+                \end{minted}
+
+    \section{RAW Sockets}
+        \subsection{ICMP Compliant Client}
+            \begin{minted}{c}
+#include <stdio.h>
+#include <sys/socket.h>
+#include <string.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <time.h>
+
+// NOTE: Reading from the raw_sock returns the IP Header too!!!!! Parse it out or prevent the socket from returning
+// it all along if you want to get info like the incoming payload
+// and the like. I believe you cannot prevent the IP header from being returned though...
+
+// NOTE: Quitting with CTRL + C throws an exit code different than 0... Check out why!
+
+// NOTE: Running the program requires sudo privileges. Otherwise port writes will just fail as we are using RAW sockets.
+// Investigate linux capabilities to allow the program to use RAW
+// sockets without requeiring root privileges
+
+// Echo request anatomy -> https://en.wikipedia.org/wiki/Ping_(networking_utility)
+
+/*
+                                                            ECHO REQUEST STRCUTURE
++-----------------------------------------------------------------------------------------------------------------------------------------------------+
+| 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 |
++-----------------------------------------------------------------------------------------------------------------------------------------------------+
+|           Type = 8            |               Code = 0              |                                  Checksum                                     |
++-----------------------------------------------------------------------------------------------------------------------------------------------------+
+|                           Identifier                                |                                  Seq. Num                                     |
++-----------------------------------------------------------------------------------------------------------------------------------------------------+
+|                                                                  Payload                                                                            |
++-----------------------------------------------------------------------------------------------------------------------------------------------------+
+
+Checksum -> Break the entire header into 16-bit chunks taking the checksum to have a value of 0. Add them together using one's complement addition and
+            flip the result.
+*/
+
+void generate_icmp_msg(unsigned int*, int);
+int compute_checksum(int*, int);
+int ones_complement_16_bit_sum_simple(int, int);
+int ones_complement_16_bit_sum(int, int, char);
+int little_to_big_endian(int);
+void keyboard_int_handler(int);
+void quit_error(char*);
+
+volatile int continue_pinging = 1;
+
+int main(int argc, char** argv) {
+    if (argc != 2) {
+        printf("Use: %s IP\n", argv[0]);
+        return -1;
+    }
+    // As seen in RFC 1700, page 8, IANA's Protocol Number for ICMP is 1. This is the protocol
+    // discriminator used in IP!
+    int raw_sock = socket(AF_INET, SOCK_RAW, 1);
+
+    struct sockaddr_in server_addr;
+
+    // Refer to 'man raw.7' to see how sin_port should be set to 0 due to bugs in
+    // the kernels network stack implementation!
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(0);
+    if (!inet_aton(argv[1], &server_addr.sin_addr))
+        quit_error("The provided IP is NOT valid!\n");
+
+    unsigned int icmp_msg[6];
+
+    // This function will modify icmp_msg[] as we are passing it by reference
+    generate_icmp_msg(icmp_msg, sizeof(icmp_msg));
+
+    // We need to define a variable containing the structs size as C doesn't
+    // like us using &sizeof(serv_addr)...
+    unsigned int serv_addr_size = sizeof(server_addr);
+    int curr_time, recv_bytes;
+
+    // Buffer holding the incoming message
+    int in_buff[60];
+    while(continue_pinging) {
+        printf("Sent bytes: %ld", sendto(raw_sock, icmp_msg, sizeof(icmp_msg), 0,
+                                  (struct sockaddr*) &server_addr, sizeof(server_addr)));
+        printf("\tReceived %ld bytes from %s\n", recvfrom(raw_sock, in_buff, sizeof(in_buff), 0,
+                                                 (struct sockaddr*) &server_addr, &serv_addr_size),
+                                                 inet_ntoa(server_addr.sin_addr));
+        sleep(1);
+    }
+    close(raw_sock);
+    return 0;
+}
+
+// Generate the entire ICMP header and store it in the buffer pointed to by msg. The codes
+// and the like are explained at the beginning of the source file! We are then configuring
+// a custom payload for testing purposes: "Saiba Samurai!Pc" The real ping client includes
+// the timestamp to compute Round Trip Times and avoid having to store the time it sent each
+// packet! Compliant ping "servers" need to include the payload as is in the replies
+void generate_icmp_msg(unsigned int* msg, int size) {
+    char type = 0x08, code = 0x00;
+    int checksum = 0x0000, id = 0x0005, seq_num = 0x000A;
+
+    msg[0] = type << 24 | code << 16 | checksum;
+    msg[1] = id << 16 | seq_num;
+    msg[2] = 'S' << 24 | 'a' << 16 | 'i' << 8 | 'b';
+    msg[3] = 'a' << 24 | ' ' << 16 | 'S' << 8 | 'a';
+    msg[4] = 'm' << 24 | 'u' << 16 | 'r' << 8 | 'a';
+    msg[5] = 'i' << 24 | '!' << 16 | 'P' << 8 | 'c';
+
+    // Adjust to the network's endianness!
+    msg[0] = little_to_big_endian(msg[0] | compute_checksum(msg, 6));
+
+    for (int i = 1; i < size / sizeof(msg[0]); i++)
+        msg[i] = little_to_big_endian(msg[i]);
+}
+
+// Function to compute the 16-bit one's complement sum of the inputs as the message is longer than 32-bits...
+// We are just dividing the message in 16-bit chunks and adding them up. Remember the checksum is taken to be
+// 0 when computing it!
+int compute_checksum(int* arr, int n_elms) {
+    int checksum = 0;
+    for (int i = 0; i < n_elms; i++)
+        for (int mask_shift = 1; mask_shift >= 0; mask_shift--)
+            checksum = ones_complement_16_bit_sum_simple((arr[i] & (0xFFFF << 16 * mask_shift)) >> 16 * mask_shift, checksum);
+    return (~checksum) & 0xFFFF;
+}
+
+// Function implementing a 16-bit one's complement addition taking advantage of bit-level masks!
+int ones_complement_16_bit_sum_simple(int x, int y) {
+    int aux_result = (x & 0xFFFF) + (y & 0xFFFF);
+
+    // If we had an overflow recirculate the carry!
+    // Max result = 2 * (2^16 - 1) = 2^17 - 2 -> In this case we only
+    // need to recirculate the carry once too!
+    if (aux_result >= 0X10000)
+        aux_result++;
+
+    return aux_result & 0xFFFF;
+}
+
+/* 
+  Does the same as the above but in a more explicit, bit-level way so that it is clearer
+  how the one's complement sum "works". Even though the function is recursive it will
+  NOT go out of control as if we recirculate the carry in the worst case scenario it
+  will NOT provoke a second carry. That is: 0xFFFF + 0xFFFF will provoke a carry and
+  yield 0xFFFE. When recirculating we'll get the final result 0xFFFF
+  without a second carry recirculation! The above assumes a 16-bit one's complent sum!
+*/
+int ones_complement_16_bit_sum(int x, int y, char recirculate) {
+    int aux_result = 0, carry = 0, aux_operand = y;
+    // If we are just recirculating the carry take into account the offset we
+    // apply to the second operand so that
+    // we don't have to rewrite the condition within the for loop...
+    if (!recirculate)
+        aux_operand = 1;
+
+    for (int k = 0; k < 16; k++) {
+            if (((x & 0x1 << k) >> k) != ((aux_operand & 0x1 << k) >> k))
+                aux_result |= (carry ^ 0x1) << k;
+            else {
+                aux_result |= carry << k;
+                if (x & 0x1 << k)
+                    carry = 1;
+                else
+                    carry = 0;
+            }
+        }
+    if (carry && recirculate)
+        aux_result = ones_complement_16_bit_sum(aux_result, 1, 0);
+
+    return aux_result & 0xFFFF;
+}
+
+// Function used to convert from my PC's little endian CPU (it's made by Intel) to
+// the network's big endian byte order. We could have maybe used htons() or htonl()
+// for a more portable solution but we wanted to try our hand at writing it ourselves.
+// If using a big endian PC adjust the function above accordingly so as to
+// avoid making the little -> big endian conversion!
+int little_to_big_endian(int n) {
+    int little_end_bytes[4];
+    for (int i = 0; i < 4; i++)
+        little_end_bytes[i] = (n & (0xFF << i * 8)) >> i * 8;
+
+    return little_end_bytes[0] << 24 | little_end_bytes[1] << 16 | little_end_bytes[2] << 8 | little_end_bytes[3];
+}
+
+// Keyboard interrupt (CTRL + C) handler
+void keyboard_int_handler(int dummy) {
+    continue_pinging = 0;
+    #if INTCLOSE
+        printf("Quitting...\n");
+        exit(0);
+    #endif
+}
+
+// Helper function for printing an error message and exiting
+void quit_error(char* err_msg) {
+    fprintf(stderr, "%s", err_msg);
+    exit(-1);
+}
+            \end{minted}
+\end{document}
