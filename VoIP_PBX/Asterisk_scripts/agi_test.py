@@ -4,7 +4,8 @@ import asterisk.agi as agi
 
 def main():
     agi_inst = agi.AGI()
-    agi_inst.verbose("python agi started")
+    agi_inst.verbose("Printing available channel values")
+    agi_inst.verbose(str(agi_inst.env))
     callerId = agi_inst.env['agi_callerid']
     agi_inst.verbose("call from %s" % callerId)
     while True:
