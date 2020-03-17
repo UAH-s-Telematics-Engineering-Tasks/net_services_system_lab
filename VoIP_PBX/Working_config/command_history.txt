@@ -1,0 +1,265 @@
+    1  c
+    2  ls
+    3  vim Get_src_n_dependencies.sh 
+    4  sudo bash Get_src_n_dependencies.sh 
+    5  vim Get_src_n_dependencies.sh 
+    6  sudo bash Get_src_n_dependencies.sh 
+    7  x
+    8  exit
+    9  sudo vim /var/lib/asterisk/agi-bin/agi_test.py 
+   10  ls -l /var/lib/asterisk/agi-bin/
+   11  sudo vim /var/lib/asterisk/agi-bin/agi_test.py 
+   12  x
+   13  exit
+   14  sudo apt install unixodbc
+   15  apt show odbcinst
+   16  sudo apt update 
+   17  sudo apt install unixodbc
+   18  apt show libtool
+   19  apt show libtool-bin
+   20  sudo apt install mysql-server
+   21  sudo apt install libtool
+   22  sudo apt purge libtool 
+   23  sudo apt install libltdl7 libltdl-dev 
+   24  systemctl status mysql.service
+   25  mysql -u root -p
+   26  sudo mysql -u root -p
+   27  mysql -u asterisk -p asterisk
+   28  lsb_release -a
+   29  arch
+   30  ip a
+   31  nc -l 1234 > mysql_odbc_connector.tar.gz
+   32  ls
+   33  tar -xvf mysql_odbc_connector.tar.gz
+   34  l
+   35  rm mysql_odbc_connector.tar.gz 
+   36  cd mysql-connector-odbc-8.0.19-linux-ubuntu18.04-x86-64bit/
+   37  ls
+   38  cat README.txt 
+   39  ls
+   40  cat INFO_BIN 
+   41  ls /bin/
+   42  ls bin/
+   43  ls lib/
+   44  ./bin/myodbc-installer 
+   45  cp bin/* /usr/local/bin/
+   46  sudo cp bin/* /usr/local/bin/
+   47  sudo cp lib/* /usr/local/lib/
+   48  echo $PATH 
+   49  sudo vim /etc/odbcinst.ini
+   50  sudo vim /etc/odbcinst.ini 
+   51  sudo vim /etc/odbc.ini 
+   52  myodbc-installer -a -d -n "MySQL ODBC 8.0 Driver" -t "Driver=/usr/local/lib/libmyodbc8w.so"
+   53  sudo myodbc-installer -a -d -n "MySQL ODBC 8.0 Driver" -t "Driver=/usr/local/lib/libmyodbc8w.so"
+   54  vim /etc/odbcinst.ini 
+   55  sudo vim /etc/odbc.ini 
+   56  sudo vim /etc/odbcinst.ini 
+   57  odbcinst -q -d
+   58  sudo vim /etc/odbc.ini 
+   59  ls /var/lib/mysql
+   60  sudo ls /var/lib/mysql
+   61  sudo ls -l /var/lib/mysql
+   62  /var/run/mysqld/mysqld.sock
+   63  ls /tmp/
+   64  vim /etc/mysql/mysql.cnf 
+   65  vim /etc/mysql/mysql.conf.d/mysqld.cnf 
+   66  sudo vim /etc/odbc.ini 
+   67  ls /var/run/mysqld/
+   68  ls -l /var/run/mysqld/
+   69  fg
+   70  isql -v asterisk-connector asterisk asterisk
+   71  sudo vim /etc/odbcinst.ini 
+   72  sudo isql -v asterisk-connector asterisk asterisk
+   73  cat /etc/odbc.ini 
+   74  sudo vim /etc/odbc.ini 
+   75  isql -v asterisk-mysql-cnx asterisk asterisk
+   76  clear
+   77  isql -v asterisk-mysql-cnx asterisk asterisk
+   78  c
+   79  clear
+   80  ls /usr/share/
+   81  sudo wget -O /usr/share/asterisk-17.2.tar.gz https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-17.2.0.tar.gz
+   82  cd /usr/share/
+   83  sudo tar -xvf asterisk-17.2.tar.gz 
+   84  sudo rm asterisk-17.2.tar.gz 
+   85  cd asterisk-17.2.0/
+   86  sudo ./configure
+   87  vim config.log 
+   88  sudo apt install g++
+   89  sudo ./configure
+   90  sudo apt install make
+   91  sudo ./configure
+   92  ls /
+   93  ls /vagrant/
+   94  cp /vagrant/Asterisk_setup/Get_src_n_dependencies.sh ~
+   95  vim ~/Get_src_n_dependencies.sh 
+   96  sudo bash ~/Get_src_n_dependencies.sh 
+   97  sudo make menuselect
+   98  ls /var/lib/asterisk/sounds/
+   99  sudo ./configure 
+  100  sudo make
+  101  sudo make menuselect
+  102  sudo ./configure 
+  103  make menuselect
+  104  sudo make menuselect
+  105  cd ../
+  106  sudo rm -r asterisk-17.2.0/
+  107  ls
+  108  sudo wget -O /usr/share/asterisk-17.2.tar.gz https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-17.2.0.tar.gz
+  109  sudo tar -xvf asterisk-17.2.tar.gz 
+  110  cd asterisk-17.2.0/
+  111  sudo ./configure 
+  112  sudo make menuselect
+  113  sudo make && sudo make install
+  114  sudo make samples 
+  115  cd /etc/asterisk/
+  116  ls
+  117  sudo mv sip.conf sip.conf.bak
+  118  sudo mv extensions.conf extensions.conf.bak
+  119  sudo mv features.conf features.conf.bak
+  120  sudo mv voicemail.conf voicemail.conf.bak
+  121  sudo mv modules.conf modules.conf.bak
+  122  sudo cd /vagrant/Asterisk_config/* .
+  123  sudo bash -c "cd /vagrant/Asterisk_config/* ."
+  124  sudo cp /vagrant/Asterisk_config/* .
+  125  ls
+  126  sudo rm README.md 
+  127  isql -v asterisk-mysql-cnx asterisk asterisk
+  128  clear
+  129  sudo cp /vagrant/Asterisk_setup/User_n_permissions.sh ~
+  130  cd ~
+  131  vim User_n_permissions.sh 
+  132  sudo vim User_n_permissions.sh 
+  133  sudo bash User_n_permissions.sh 
+  134  cat /etc/group | grep asterisk
+  135  sudo useradd asterisk
+  136  sudo passwd asterisk 
+  137  ls /etc/systemd/system
+  138  ls
+  139  sudo cp /vagrant/Asterisk_setup/asterisk.service /etc/systemd/system
+  140  sudo systemctl daemon-reload
+  141  sudo systemctl status asterisk.service 
+  142  sudo systemctl start asterisk.service
+  143  sudo systemctl status asterisk.service
+  144  sudo bash User_n_permissions.sh 
+  145  sudo systemctl status asterisk.service
+  146  sudo systemctl start asterisk.service
+  147  sudo systemctl status asterisk.service
+  148  sudo systemctl reset-failed asterisk
+  149  sudo systemctl status asterisk.service
+  150  sudo systemctl start asterisk.service
+  151  sudo systemctl status asterisk.service
+  152  sudo groupadd asterisk
+  153  sudo chown -R asterisk:asterisk /var/lib/asterisk
+  154  sudo systemctl reset-failed asterisk
+  155  sudo systemctl start asterisk.service
+  156  sudo systemctl status asterisk.service
+  157  clear
+  158  su -c "asterisk -rvvvvv" -l asterisk
+  159  sudo vim /etc/asterisk/res_odbc.conf 
+  160  su -c "asterisk -rvvvvv" -l asterisk
+  161  sudo apt install python3-pip
+  162  sudo pip3 install pyst2
+  163  sudo vim /etc/asterisk/extensions.conf
+  164  vim agi_test.py
+  165  which python3
+  166  vim agi_test.py
+  167  python3
+  168  vim agi_test.py
+  169  python3
+  170  vim agi_test.py
+  171  su -c "asterisk -rvvvvv" -l asterisk
+  172  sudo vim /etc/asterisk/extensions.conf
+  173  su -c "asterisk -rvvvvv" -l asterisk
+  174  ip a
+  175  su -c "asterisk -rvvvvv" -l asterisk
+  176  chown asteris:asterisk agi_test.py 
+  177  chown asterisk:asterisk agi_test.py 
+  178  sudo chown asterisk:asterisk agi_test.py 
+  179  ls -l
+  180  su -c "asterisk -rvvvvv" -l asterisk
+  181  su -c "python3" -l asterisk
+  182  sudo cp agi_test.py /var/lib/asterisk/scripts/
+  183  ls -l /var/lib/asterisk/scripts/
+  184  sudo chown asterisk:asterisk /var/lib/asterisk/scripts/agi_test.py
+  185  sudo chmod +x /var/lib/asterisk/scripts/agi_test.py
+  186  ls -l /var/lib/asterisk/scripts/
+  187  sudo vim /etc/asterisk/extensions.conf
+  188  su -c "asterisk -rvvvvv" -l asterisk
+  189  sudo mv /var/lib/asterisk/scripts/agi_test.py /var/lib/asterisk/agi-bin/
+  190  sudo ls -l /var/lib/asterisk/agi-bin/
+  191  sudo chmod +x /var/lib/asterisk/agi-bin/agi_test.py 
+  192  sudo ls -l /var/lib/asterisk/agi-bin/
+  193  su -c "asterisk -rvvvvv" -l asterisk
+  194  mysql -u asterisk -p asterisk
+  195  su -c "asterisk -rvvvvv" -l asterisk
+  196  exit
+  197  ls
+  198  vim agi_test.py 
+  199  cd /etc/asterisk/
+  200  ls
+  201  vim res_odbc.conf 
+  202  vim ../odbc.ini 
+  203  ls /vagrant/
+  204  ls /vagrant/Asterisk_config/
+  205  cp res_odbc.conf /vagrant/Asterisk_config/
+  206  vim sip.conf
+  207  vim extensions.conf
+  208  sudo vim extensions.conf
+  209  exit
+  210  sl
+  211  ls
+  212  systemctl status asterisk.service
+  213  sudo systemctl start asterisk.service 
+  214  systemctl status asterisk.service
+  215  c
+  216  clear
+  217  su -c "asterisk -rvvvvv" -l asterisk
+  218  sudo wget -O /var/lib/asterisk/sounds/en/extra-en.zip https://www.asterisksounds.org/sites/asterisksounds.org/files/sounds/en/download/asterisk-sounds-extra-en-2.9.15.zip
+  219  vim /var/lib/asterisk/agi-bin/agi_test.py 
+  220  clear
+  221  sudo mkdir /var/lib/asterisk/sounds/es
+  222  cd /var/lib/asterisk/sounds/
+  223  ñs
+  224  ls
+  225  cd es/
+  226  ls
+  227  unzip core-es.zip 
+  228  sudo apt install unzip
+  229  unzip core-es.zip 
+  230  sudo unzip *.zip
+  231  ls
+  232  sudo unzip core-es.zip 
+  233  sudo unzip extra-es.zip 
+  234  ls
+  235  cd ../
+  236  cd en/
+  237  sudo unzip extra-en.zip 
+  238  cd ../
+  239  cd ..
+  240  sudo chown -R asterisk:asterisk sounds/
+  241  clear
+  242  cd /etc/asterisk/
+  243  mysql -p -u asterisk
+  244  su -c "asterisk -rvvvvv" -l asterisk
+  245  mysql -p -u asterisk
+  246  sudo apt install mongodb
+  247  mysql -p -u asterisk
+  248  nc -N 192.168.1.34 1234 < /tmp/recording.wav 
+  249  nc -N 192.168.1.49 1234 < /tmp/recording.wav 
+  250  sudo pip3 install google-cloud-speech
+  251  history | grep pip
+  252  cd
+  253  nc -l 1234 > g_api_key.json
+  254  vim .bashrc 
+  255  pwd
+  256  fg
+  257  . .bashrc 
+  258  env | grep GOOGLE
+  259  cat .bashrc 
+  260  cp .bashrc /vagrant/Working_config/
+  261  cd /etc/
+  262  cp odbc* /vagrant/Working_config/
+  263  cd asterisk/
+  264  cp sip.conf extensions.conf extconfig.conf func_odbc.conf features.conf voicemail.conf /vagrant/Working_config/
+  265  history > /vagrant/Working_config/command_history.txt

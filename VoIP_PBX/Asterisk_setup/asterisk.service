@@ -11,7 +11,9 @@ Group=asterisk
 # specified in User and Group respectively and delete it on daemon shutdown
 # Note /var/run is just a link to /run!
 RuntimeDirectory=asterisk
-Environment=HOME=/var/lib/asterisk
+# Add GOOGLE's API Key to asterisk's environment!
+# Make sure g_api_key.json belongs to asterisk:asterisk!
+Environment="HOME=/var/lib/asterisk" "GOOGLE_APPLICATION_CREDENTIALS=/home/vagrant/g_api_key.json"
 WorkingDirectory=/var/lib/asterisk
 ExecStart=/usr/sbin/asterisk -f -C /etc/asterisk/asterisk.conf
 ExecStop=/usr/sbin/asterisk -rx 'core stop now'
