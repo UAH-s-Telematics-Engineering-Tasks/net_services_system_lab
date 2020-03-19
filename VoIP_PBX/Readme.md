@@ -204,6 +204,66 @@ Además de estas opciones hemos declarado que el host asociado a estos usuarios 
 
 Empleando la plantilla anterior instanciamos dos usuarios cuyos nombres de usuario y contraseña son `pablo/pablo` y `alice/alice` (ya dijimos que la seguridad no era lo nuestro...). Dado que asterisk es capaz de reproducir mensajes de audio a los usuarios podemos configurar un idioma para cada uno. De no hacerlo se utilizará el inglés como estándar. Esto cobrará importancia al instalar archivos de audio de otros idiomas más adelante. Por ahora basta con saber que el idioma que se empleará para `pablo` es espñol en vez de inglés.
 
+Con todo listo y los usuarios registrados podemos comprobar que todo ha ido correctamente ejecutando `sip show peers` en la **CLI** de `asterisk` y viendo que los usuarios registrados cuentan con una *IP* (la de su terminal) en la columna `host`.
+
 Con los usuarios configurados es momento de empezar a dotar a nuestra PBX de funcionalidad a través del archivo de maración.
 
-### La primera llamada
+### Hola mundo y la primera llamada
+Acostumbrados a asociar un número de teléfono con cada usuario en la red telefónica tradicional debemos dejar claro que esta relación **NO** se establece al configurar los usuarios en `sip.conf`. Si nos fijamos veremos que no hemos hablado de ningún número hasta ahora. La lógica de la centralita se condensa en el archivo `extensions.conf` que tiene una sintaxis muy particular. En él definimos los números (extensiones) a las que podemos llamar desde cualquier terminal que cuente con un usuario registrado. De aquí en adelante siempre que hablemos de terminal damos por sentado que se ha configurado un usuario y que se encuentra registrado. Especificamos también las acciones que llevar a cabo ante una llamada a través de las llamadas [*dialplan applications*](https://wiki.asterisk.org/wiki/display/AST/Asterisk+17+Dialplan+Applications). La sintaxis que siguen las reglas es una de las siguientes: 
+
+```ini
+; Formato 1
+extension => número_extensión, prioridad, aplicación_a
+extensión => número_extensión, prioridad + 1, aplicación_b
+
+; Formato 2
+extension => número_extensión, prioridad, aplicación_a
+    same => prioridad + 1, aplicación_b
+```
+
+Señalamos que la primera prioridad deber ser `1` y que en las reglas siguientes debemos ir incrementando la prioridad en `1` unidad o incluir directamente la prioridad `n` que incrementa esta prioridad de 1 en 1 de forma implícita. Además de números de extensión estáticos podemos incluir también reglas con comodines que coincidad con una serie de números en base a unas reglas bien definidas.
+
+Una aplicación muy sencilla que simplemente reproduce un mensaje al llamante cuando se llama al número `100` sería:
+
+```ini
+[from-internal]
+; Hello World (a.k.a General Tests)
+exten => 100,1,Answer()                 ; Asterisk descuelga el la línea
+     same => n,Wait(1)                  ; Espera 1 segundo para dar tiempo al terminal a prepararse
+     same => n,Playback(hello-world)    ; Reproduce un mensaje de vuelta al llamante
+	 same => n,Wait(1)                  ; Espera 1 segundo para no cortar el final del mensaje
+	 same => n,Hangup()                 ; Cuelga la llamada
+```
+
+Nótese que hemos eliminado una línea que accede a una base de datos ya que no nos aporta nada por ahora. Se han explicado las aplicaciones empleadas con comentarios a su lado. Además 
+llamamos la atención al contexto bajo el que se encuadra la extensión que incluimos que no es otro que el que señalábamos al definir los usuarios de nuestra centralita, `from-internal`. Finalmente señalamos que el parámetro que le pasamos a la aplicación `Playback()` es un archivo de audio (sin la extensión) que se encuentra en los directiorios `/var/lib/asterisk/sounds/<idioma>` donde `<idioma>` puede ser `en` o `es` para inglés y español respectivamente entre otras.
+
+Por ahora nos centraremos en la forma de hacer una llamada normal a través de la aplicación `Dial()`. Aprovecharemos también para incluir los conceptos de variables globales y subrutinas además de mostrar un ejemplo de extensiones con comodines:
+
+```ini
+[globals]
+; Extension <--> Peer Mappings
+200=alice
+201=pablo
+202=foo
+203=foodb
+
+[from-internal]
+; User calls!
+exten => _2XX,1,Set(peer_name=${GLOBAL(${EXTEN})})                  ; Asigna un valor determinado a la variable 'peer_name'
+    same => n,GotoIf($["${peer_name}" = ""]?wrong_peer,1)           ; Si la extensión llamada no corresponde a nadie salta a la extensión 'wrong-peer'
+    same => n,gosub(store-data,s,1,(${EXTEN}))                      ; Antes de llamar llama a la subrutina 'store-data'
+    same => n,Dial(SIP/${GLOBAL(${EXTEN})},10,tm(native-random))    ; Llama al usuario requerido
+    same => n,VoiceMail(${EXTEN})                                   ; Si no coge la llamada dejamos un mensaje de voz
+
+exten => wrong_peer,1,Verbose(2,Called a wrong peer...)             ; Escribe en la CLI un mensaje
+    same => n,Playback(tt-weasels)                                  ; Reproduce el audio
+    same => n,Wait(1)                                               ; Espera 1 segundo para finalizar la reproducción suavemente
+    same => n,Hangup()                                              ; Cuelga el canal
+
+; Sotore charging data in appropriate DBs
+[store-data]
+exten => s,1,Verbose(${ODBC_SQL(INSERT INTO call_data (caller_id, called_exten) VALUES (\"${CALLERID(all):4:-1}\", ${ARG1}))})  ; Inserta datos en una DB
+    same => n,AGI(update_mongo_db.py,${GLOBAL(${ARG1})})                                                                        ; Llama a un script externo
+    same => n,Return()                                                                                                          ; Vuelve a la extensión que nos llamó
+```
