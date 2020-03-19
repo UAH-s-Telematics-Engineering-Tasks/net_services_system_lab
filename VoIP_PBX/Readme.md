@@ -137,4 +137,73 @@ Lo que hace el script de insatlación en definitiva es bajar las fuentes de `ast
 ### Hora de compilar
 Los desarrolladores de `asterisk` han pensado en nosotros al haber preparado un `Makefile`. `Make` es una herramienta de `GNU` que automatiza la compilación de cualquier tipo de proyecto. Antes de poder emplear este `Makefile` debemos cerciorarnos de cumplir todos los requisitos para instalar el programa para lo que ejecutamos el script `configure` navegando hasta `/usr/share/asterisk` (el lugar al que habíamos descomprimido las fuentes) y ejecutamos `./configure`. Si como esperamos todo está correcto podemos pasar a compilar el programa con tan sólo invocar `make`. Dada la extensión del programa y toda la funcionalidad que aporta es posible que no requiramos alguno de los módulos que se incorporan para trabajar. Para seleccionar qué cargar y qué no podemos ejecutar `make menuselect` para entrar en un menú gráfico basado en `ncurses` en el que escoger lo que usar. Tras decidirnos con correr `make install` tendremos `asterisk` instalado. Además del propio programa queremos tener una configuración de la que partir para tener una base sobre la que trabajar. Ejecutando `make samples`se copiaran configuraciones de ejemplo a `/etc/asterisk` para que podamos empezar a trabajar.
 
-Con todo preparado nos queda ejecutar el propio programa. Teniendo la seguridad en mente hemos decidido ejecutar `asterisk` como un servicio de `systemd` para lo que hemos tenido que dar algún paso más. Todo aparece documentado en el anexo.
+Con todo preparado nos queda ejecutar el propio programa. Teniendo la seguridad en mente hemos decidido ejecutar `asterisk` como un servicio de `systemd` para lo que hemos tenido que dar algún paso más. Todo aparece documentado en el anexo. A partir de ahora asumiremos que `asterisk` está corriendo en segundo plano. Pasamos pues a lanzar una terminal de `asterisk` para poder obtener información útil para la configuración.
+
+## Primer contacto con `asterisk`
+Con `asterisk` corriendo queremos lanzar una terminal contra la instancia en segundo plano, es decir, no queremos lanzar otro segundo proceso de `asterisk`. La mejor manera de obtener información acerca de un comando es consultar las páginas del manual de UNIX a través del comando `man`. Al hacerlo veremos que con la opción `-r` podemos conectarnos a instancias activas, justo lo que necesitamos. Además de esto podemos añadir una serie de `v`s para incrementar el nivel de verbosidad de la sesión que estamos a punto de abrir. La verbosidad no es más que el nivel de información que queremos recibir, a más verbosidad más 
+detallada será la información que se nos devuelva. En nuestro caso hemos empleado un nivel de verbosidad de `5` con lo que el comando que emplearemos para abrir la sesión contra `asterisk` es `asterisk -rvvvvv`.
+
+Tal y como hemos preparado nuestro sistema no podemos ejecutar directamente el comando anterior. Dado que el usuario que ha lanzado el daemon de `asterisk` es `asterisk` (a pesar de que tengan el mismo nombre son cosas totalmente distintas. Es común en sistemas UNIX emplear un nombre de usuario igual que el del ejecutable en cuestión. Debemos tener cuidado porque es muy fácil que esto nos confunda...) el usuario que puede conectarse es `asterisk`, no nostros. Al trabajar con `vagrant` el usuario con el que nos logueamos en la máquina es `vagrant` (ya estamos otra vez con nombres repetidos...) con lo que tendremos que ejecutar el comando como si fuéramos `asterisk`. A pesar de que muchos pensamos que el comando `su` solo sirve para iniciar una sesión como `root` nos permite ejecutar comandos como si fuéramos cualquier otro usuario. La opción `-c` nos permite incluir el comando a ejecutar y la opción `-l` indica el usuario a emplear para lanzazr el comando. Por tanto siempre que queramos conectarnos en nuestra máquina a la instancia de `asterisk` que está corriendo emplearemos: `su -c 'asterisk -rvvvvv' -l asterisk`. El comando anterior nos pedirá la contraseña del usuario `asterisk` (que en nuestro caso es `asterisk`, no somos muy de seguridad...) y ¡ya estaremos dentro!
+
+En el anexo hemos comentado una serie de comandos básicos que nos permitiran trabajar de una manera más cómoda. Siendo capaces de interactuar de forma directa con `asterisk` pasamos a comentar las diferentes "piezas" que lo componen para después empezar a hablar de configuraciones.
+
+## Diseccionando `astrisk`
+### Registrando usuarios
+A pesar de darlo muchas veces por sentado las centralitas cuentran con clientes que en algún momento deben haberse vinculado. Este proceso es lo que se conoce como *registro* en el contexto de la telefonía *VoIP* y las entidades que se registran se denominan *endpoints* y pueden ser de `3`tipos:
+
+- **Peer**: Solamente podrá recibir llamadas
+- **User**: Solamente hace llamadas
+- **Friend**: Auna ambas funcionalidades
+
+En nuestro caso trabajaremos principalmente con *friends* pero llegado el momento trabajaremos con un par de *peers* que se encargarán de atender las llamadas de unas colas de servicio.
+
+`Asterisk` internamente maneja canales de comunicación que abre según se requieran. Al hacer una llamada es el llamante el que crea un primer canal hasta `asterisk` y es `asterisk` el que crea un segundo canal con el llamado para después conectar ambos de manera que se pueda cursar la llamada. Los llamados *channel drivers* se encargan de crear y gestionar estos canales en función de la tecnología subyacente. En el contexto de la telefonía *IP* empleamos el protocolo **SIP** (**S**ession **I**nitiation **P**rotocol) con lo que nos encargaremos de configurar un *SIP Channel Driver*.
+
+`Asterisk` cuenta con 2 manejadores **SIP**, `res_pjsip` y `chan_sip`. El primero es más moderno y la mayor parte del código fuente no es nativo de `asterisk` ni ha sido desarrollado por la gente de *Digium*. El segundo está *deprecado* (se acabará eliminando en posteriores versiones) pero nos ha resultado más sencillo trabajar con él. Nuestro caso de uso es relativamente particular en el sentido de que estamos constantemente cambiando de red de área local y los teléfonos registrados así como la propia configuración. Constantemente nos encontramos registrando nuevos usuarios y desregistrando a otros con la que la facilidad para hacer este proceso es muy importante. Si bien `res_pjsip` es más moderno las herramientas que nos brinda la **CLI** de `asterisk` para manejar `chan_sip` nos han resultado más intuitivas con lo que hemos optado por emplear este segundo manejador.
+
+Dado que la versión de `asterisk` con la que hemos trabajado es la `17` hemos tenido que cambiar `res_pjsip` que venía incluido de manera nativa por el antiguo `chan_sip`. Para ello hemos tenido que modificar el archivo `modules.conf` con las siguientes líneas:
+
+```ini
+; Remove res_pjsip and make way for good old chan_sip
+load => chan_sip.so
+noload => res_pjsip.so
+```
+
+Recargando la instancia de `asterisk` para que se plasmaran los cambios veremos cómo hemos cambiado el manejador **SIP**. Podemos comprobarlo ejecutando el comando `sip show peers` y viendo que se nos devuelve una lista por ahora vacía.
+
+Ahora ha llegado el momento de generar una serie de usuarios contra los que se podrán registrar los distintos terminales. Para ello tenemos que trabajar con el archivo `sip.conf` y añadir al final del mismo lo siguiente:
+
+```ini
+; Friend template
+[friends_internal](!)
+type=friend
+host=dynamic
+context=from-internal
+disallow=all
+allow=ulaw ; Audio codec
+allow=h264 ; Video codec
+
+; Template instances
+[alice](friends_internal)
+secret=alice
+
+[pablo](friends_internal)
+secret=pablo
+language=es
+```
+
+Debemos empezar por dejar claro que el extracto de la configuración que hemos incluido se apoya en opciones por defecto que ya existían en la docuentación generado con `make samples` durante la instalación. El modo de transporte para los clientes configurados es `UDP` y hemos puesto as `asterisk` a "escuchar" en todas las interfaces a través de la opción:
+
+```ini
+udpbindaddr=0.0.0.0
+```
+
+El primer bloque de configuración se corresponde con una plantilla o template para usuarios de un mismo tipo (de ahí el `(!)` final). En ella declaramos que los clientes de tipo `friends_inetrnal` son `friends` (pueden iniciar y recibir llamadas) y que emplearán la [*Ley-Mu*](https://en.wikipedia.org/wiki/G.711#%CE%BC-law) para codificar el audio (`allow=ulaw`) y el códec `H.264` para el video. Antes de estas dos opciones hemos deshabilitado todos los demás códecs con `disallow=all` para evitar posibles colisiones. Cabe destacar que si bien `asterisk` puede traducir códecs de audio entre clientes que empleen dos distintos no es capaz de hacer lo mismo con el vídeo, cosa que debemos tener en cuenta al configurar las videollamadas. El contexto del usuario por ahora carece de sentido pero lo explicaremos al comentar el plan de marcación que se incluye en `extensions.conf`. Por ahora debemos saber que el contexto de estos usuarios es `from-internal`.
+
+Además de estas opciones hemos declarado que el host asociado a estos usuarios es dinámico. En vez de saber que una IP específica se va a registrar contra estos usuarios dejamos que sea el usuario el que se registre desde cualquier dirección. Es importante señalar que somos capaces de desregistrar estos usuarios para evitar conflictos de manera automática empleando el comando `sip unregister <nombre_de_usuario>` desde la **CLI** de `asterisk`. El proceso de registro varía en función del softphone que se emplee. En nuestro caso hemos usado *linphone* en teléfonos *android*. Para este sistema tenemos que emplear una cuenta **SIP** e introducir nuestro usuario y contraseña (lo vemos en un momento) además de la IP de la máquina ejecutando `asterisk` (lo podemos consultar ejecutando `ip a` desde una shell normal en la misma). Debemos emplear **UDP** en la capa de transporte tal y como comentábamos más arriba dada nuestra configuración. Para nuestro escenario emplear **UDP** no supone un inconveniente ya que no buscamos una calidad de servicio extrema y conseguimos trabajar sobre una base más liviana y menos exigente.
+
+Empleando la plantilla anterior instanciamos dos usuarios cuyos nombres de usuario y contraseña son `pablo/pablo` y `alice/alice` (ya dijimos que la seguridad no era lo nuestro...). Dado que asterisk es capaz de reproducir mensajes de audio a los usuarios podemos configurar un idioma para cada uno. De no hacerlo se utilizará el inglés como estándar. Esto cobrará importancia al instalar archivos de audio de otros idiomas más adelante. Por ahora basta con saber que el idioma que se empleará para `pablo` es espñol en vez de inglés.
+
+Con los usuarios configurados es momento de empezar a dotar a nuestra PBX de funcionalidad a través del archivo de maración.
+
+### La primera llamada
