@@ -35,7 +35,7 @@ Tal y como hemos preparado nuestro sistema no podemos ejecutar directamente el c
 
 En el anexo hemos comentado una serie de comandos básicos que nos permitiran trabajar de una manera más cómoda. Siendo capaces de interactuar de forma directa con `asterisk` pasamos a comentar las diferentes "piezas" que lo componen para después empezar a hablar de configuraciones.
 
-## Diseccionando `astrisk`
+## Funcionalidad de una PBX básica
 ### Registrando usuarios
 A pesar de darlo muchas veces por sentado las centralitas cuentran con clientes que en algún momento deben haberse vinculado. Este proceso es lo que se conoce como *registro* en el contexto de la telefonía *VoIP* y las entidades que se registran se denominan *endpoints* y pueden ser de `3`tipos:
 
@@ -158,7 +158,7 @@ exten => s,1,Verbose(${ODBC_SQL(INSERT INTO call_data (caller_id, called_exten) 
 
 A pesar de que parece que la extensión es muy complicada veremos cómo en realidad no es nada más que un tema de orden. La extensión `_2XX` es un patrón (empieza con `_`) que coincide con los números en el intervalo `[200, 299]`, es decir, `X` sustituye a un dígito cualquiera. Nada más entrar por esta extensión fijamos el valor de una variable para este canal, `peer_name`. En vez de tener que reescribir esta extensión para cada usuario hemos creado una zona de variables globales (justo debajo de `[globals]`) que nos permite traducir los valores numéricos a nombres de usuario. Cada canal tiene una serie de [variables básicas](https://wiki.asterisk.org/wiki/display/AST/Asterisk+Standard+Channel+Variables) que podemos emplear para obtener información. Lo único que hacemos es obtener el valor de la variable global que identificamos con la extensión que ha sido llamada. En el plan de marcación accedemos al valor de variables a través del "operador" `${}` con lo que `${EXTEN}` nos devuelve el valor de la extensión marcada. La "función" `GLOBAL(X)` nos devuelve el valor de la variable global identificada por `X` y asignamos al valor a la variable del canal que definimos con el operador `${}` de nuevo (sí, la sintaxis es bastante fea).
 
-En caso de que este identificador no se encuentre en el área de variables globales `GLOBAL(X)` devolverá una cadena vacía (`""`) con lo que podemos usarlo de condición en un salto condicional. Si la condición se cumple saltaremos a una extensión preparada para manejar la situación y simplemente colgar al llamante tras informarle de que unas comadrejas se han comido el equipo telefónico... En caso contrario llamamos a la subrutina `store-data` yendo a su extensión `s` y prioridad `1`. Además pasamos la extensión llamada como argumento ya que el salto implica un cambio de extensión al fin y al cabo y si no no podríamos recuperarla... En la subrutina primero introducimos unos datos en la base de datos *MySQL* y luego llamamos a un script que interacciona con una base de datos *MongoDB* pra luego volver al punto en el que estábamos. Explicaremos estas aplicaciones en profundidad más adelante.
+En caso de que este identificador no se encuentre en el área de variables globales `GLOBAL(X)` devolverá una cadena vacía (`""`) con lo que podemos usarlo de condición en un salto condicional. Si la condición se cumple saltaremos a una extensión preparada para manejar la situación y simplemente colgar al llamante tras informarle de que unas comadrejas se han comido el equipo telefónico... En caso contrario llamamos a la subrutina `store-data` yendo a su extensión `s` y prioridad `1`. Nótese que esta subrutina es en el fondo otro contexto distinto a `[from-internal]`, las rutinas y macros en el plan de marcación son sus "propios" contextos tal y como veremos al comentar la emulación de un call center. Además pasamos la extensión llamada como argumento ya que el salto implica un cambio de extensión al fin y al cabo y si no no podríamos recuperarla... En la subrutina primero introducimos unos datos en la base de datos *MySQL* y luego llamamos a un script que interacciona con una base de datos *MongoDB* pra luego volver al punto en el que estábamos. Explicaremos estas aplicaciones en profundidad más adelante.
 
 De nuevo en la extensión inicial nos limitamos a llamar al usuario que habíamos obtenido antes durante un periodo máximo de `10` segundos. Además permitimos al llamado redireccionar la llamada con la opción `t` (más adelante lo comentaremos) y reproducimas música de la clase `native-random` al llamado a través de la opción `m`. En breve comentaremos qué es esto de las clases de música.
 
@@ -196,8 +196,8 @@ Si pensamos en el modelo de canales que discutíamos anteriormente donde `asteri
 
 ```ini
 ; Group Calls
-exten => 500,1,Answer()
-    same => n,ConfBridge(foo-conference)
+exten => 500,1,Answer()                     ; Asterisk descuelga la llamada
+    same => n,ConfBridge(foo-conference)    ; Y nos metemos en la sala de conferencias
 ```
 
 Cada usuario que llame a esta extensión se unirá a la "salsa de conferencias" `foo-conference` y estará comunicado con todos los demás participantes. Si bien es cierto que esta extensión es totalmente funcional no estamos empleando ninguno de los parámetros adicionales que nos ofrece esta aplicación y que nos permitirían añadir música de espera si se es el único asistente o requerir una contraseña para acceder. Todo esto se puede configurar en el archivo `confbridge.conf`.
@@ -247,3 +247,76 @@ Si queremos añadir más canciones en espera no tenemos más que añadirlas dire
 Observamos lo fácil que es darle un toque personal a `asterisk` a través de una buena selección de música. Veamos como añadir voces y muestras de audio en otros idiomas.
 
 ### Internacionalizando nuestra centralita
+Antes habíamos comentado cómo `asterisk` buscaba los archivos de audio que le pasábamos a `Playback()` en `/var/lib/asterisk/sounds/<idioma>`. Con tan solo crear otras carpetas con nombres diferentes y "rellenarlas" con muestras en el idioma elegido habremos "instalado" un nuevo idioma. Podemos poner los códigos de idioma que queramos nosotros sin problema siempre que seamos coherentes con lo configurado en `sip.conf`. Podemos incluir las muestras en español por ejemplo en `i_guess_this_is_spanish` pero hemos decidido ser tradicionales y emplear nombres comunes como `es`. Si navegamos a [`Asterisk Sounds`](https://www.asterisksounds.org/en/download) encontraremos muestras para varios idiomas. Con tan solo bajarlas y descomprimirlas en el lugar adecuado ya tenemos el trabajo hecho. Además de los archivos en español también añadimos los archivos "extra" en inglés para tener acceso a todas las muestras que pudieramos necesitar y probar así a añadir archivos de audio, no solo instalarlos desde 0.
+
+Para facilitar el proceso hemos automatizado la descarga, descompresión y limpieza en un pequeño script que se encuentra en `Asterisk_setup` y se llama `Install_es_n_extra_audio.sh`. Al igual que con el script de instalación de dependencias basta con ejecutar `bash Install_es_n_extra_audio.sh`. El contenido del archivo es:
+
+```bash
+#!/bin/bash
+
+# Get the files from asterisksounds.org
+    # Extra English audio files
+    sudo wget -O /var/lib/asterisk/sounds/en/extra-en.zip https://www.asterisksounds.org/sites/asterisksounds.org/files/sounds/en/download/asterisk-sounds-extra-en-2.9.15.zip
+
+    # Make the directory for Spanish Audio
+    sudo mkdir /var/lib/asterisk/sounds/es
+
+    # Get both file packages
+    sudo wget -O /var/lib/asterisk/sounds/es/core-es.zip https://www.asterisksounds.org/sites/asterisksounds.org/files/sounds/es-ES/download/asterisk-sounds-core-es-ES-2.9.15.zip
+    sudo wget -O /var/lib/asterisk/sounds/es/extra-es.zip https://www.asterisksounds.org/sites/asterisksounds.org/files/sounds/es-ES/download/asterisk-sounds-extra-es-ES-2.9.15.zip
+
+# Uncompress everything and clean up!
+sudo unzip /var/lib/asterisk/sounds/*/*.zip
+sudo rm /var/lib/asterisk/sounds/*/*.zip
+
+# Fix permissions for both languages
+sudo chown -R asterisk:asterisk /var/lib/asterisk/sounds
+```
+
+Fijémonos en cómo debemos actualizar los permisos de los archivos ya que al ejecutar los comandos de descompresión como `root` (hemos añadido `sudo` ya que este directorio **NO** pertenece al usuario `vagrant` sino a `asterisk`) pertenecen a `root` y `astrisk` sería incapaz de abrirlos... Con tan solo ejecutar lo anterior ya estaría todo listo y funcionando. ¡Solo nos queda comentar la macro que emula un call center para terminar de describir el funcionamiento de una PBX básica!
+
+### Emulando un Call Center
+Si pensamos en lo que es en realidad un *call-center* observaremos que no es más que un "menú" que acaba haciendo una llamada a un usuario específico en función de cómo lo recorramos. Sabiendo que contamos con saltos a distintas extensiones y prioridades podemos en cierto modo controlar el flujo de ejecución del plan de marcación con lo que conseguimos emular un menú como el que necesitamos. Para hacerlo definimos un nuevo contexto (`call-center-menu`) que nos permita independizar el punto de entrada del propio menú (reocordemos que los usuarios solo pueden marcar extensiones del contexto `[from-internal]`). Así, en el plan de marcación tan solo debemos incluir una nueva extensión que salte a este nuevo contexto. En definitiva hacemos un salto controlado a otro lugar, igual que cuando un proceso pide un servicio al *OS* provocando para ello un *trap*.
+
+Una vez lleguemos al menú en cuestión interactuamos con el usuario a través de la reproducción de muestras de voz. La entrada de este usuario son marcaciones del teclado con lo que tenemos que emplear aplicaciones que sean capaces de leerlas para poder luego interpretarlas. Para ello emplearemos la aplicación [`Background()`](https://wiki.asterisk.org/wiki/display/AST/Asterisk+17+Application_Background) que reproduce un archivo de audio a la espera de una extensión a la que saltar que se puede introducir durante la reproducción. Si bien el resultado final es parecido al de [`Goto()`](https://wiki.asterisk.org/wiki/display/AST/Asterisk+17+Application_Goto) la forma de lograr el resultado es totalmente distinta. En caso de que el usuario escuche todo el mensaje reproducido por `Background()` contamos con la aplicación [`WaitExten()`](https://wiki.asterisk.org/wiki/display/AST/Asterisk+17+Application_WaitExten) que esperará hasta que el usuario introduzca una extensión en cuestión.
+
+Solo nos queda comentar la capacidad que tenemos de asociar nombres a prioridades con el objetivo de poder saltar a ellas. Si tenemos una prioridad `n` en una extensión podemos emplear la sintaxis `n(foo)` para asociar el nombre `foo` con dicha prioridad para poder referirnos a ella más adelante.
+
+Tomando ventaja de todo lo anterior llegamos aun menú como éste definido en `extensions.conf`:
+
+```ini
+; Call Center Menu
+exten => 600,1,Goto(call-center-menu,s,1)
+
+; Call center menu
+[call-center-menu]
+exten => s,1,Answer()                                               ; Descuelga la llamada. ¡Solo habíamos saltado aquí!
+    same => n(main),Background(press-1&or&press-2)                  ; Reproduce los mensajes del argumento
+    same => n,WaitExten()                                           ; Espera a una extensión
+
+exten => 1,1,Playback(you-entered)                                  ; Reproduce la muestra del argumento
+    same => n,SayNumber(1)                                          ; Reproduce un mensaje que diga el número del arguemento
+    same => n(maina),Background(press-3&or&press-4&or&vm-helpexit)  ; Análogo a la llamda a Backgournd() aterior
+    same => n,WaitExten()                                           ; Análogo a la extensión s
+
+exten => 2,1,Playback(you-entered)
+    same => n,SayNumber(2)
+    same => n,Playback(vm-goodbye)
+    same => n,Wait(1)
+    same => n,Hangup() 
+
+exten => 3,1,Playback(spy-agent)
+    same => n,goto(s,main)                                          ; Volvemos al menu principal de la extensión s
+
+exten => 4,1,Playback(hello-world)
+    same => n,Dial(SIP/pablo)                                       ; Acabamos llamando a 'pablo' SIN poder dejar mensajes de voz
+
+exten => #,1,Playback(vm-goodbye)
+    same => n,Hangup()                                              ; Simplemente colgamos la llamada
+```
+
+La idea principal es saltar a las extensiones que se vayan introduciendo durante las llamadas a `Background()` o `WaitExten()` y controlar el flujo del menú en función de los mensajes que vamos reproduciendo al usuario. Cabe destacar, a modo de curiosidad, que para reproducir varios mensajes con una sola llamada a `Background()` debemos concatenarlos con el símbolo `&`. La sintaxis de `asterisk` sí que es horrible...
+
+Con todo documentado podemos abordar el elefante en la habitación: la interconixión de `asterisk` con bases de datos externas a través de conectores **ODBC** (**O**pen **D**ata**B**ase **C**connectors).
+
+## Un paso más allá: Interconexión con sistemas externos
