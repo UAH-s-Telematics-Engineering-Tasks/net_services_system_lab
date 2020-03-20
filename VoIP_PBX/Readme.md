@@ -937,3 +937,63 @@ A lo largo de este documento hemos visto cómo habilitar los distintos servicios
 
 # Anexo
 ## Preparando el entorno para asterisk
+En vez de ejecutar `asterisk` con el comando `sudo asterisk` hemos preferido correrlo como un servicio que depende directamente de `systemd`. Para ello hemos creado el archivo `asterisk.service` y lo hemos colocado en `/etc/systemd/system`. Así, ahora podemos gestionar la instancia de `asterisk` a través del comando `systemctl` lo que nos facilita mucho la vida. Al configurar y crear el usuario `asterisk` para ejecutar este servicio debemos darnos cuenta de que hay que cambiar los permisos de todos los archvios bajo `/var/lib/asterisk`, así como otros directorios como `/usr/lib/asterisk`, para que el proceso pueda acceder a ellos sin problemas. Este proceso aparece automatizado en `Asterisk_setup/User_n_permissions.sh` que podemos lanzar como de costumbre con `bash User_n_permissions.sh`.
+
+El servicio de `systemd` aparece configurado en `Asterisk_setup/asterisk.asterisk`:
+
+```bash
+# Got it from https://github.com/johannbg/systemd-units/blob/master/projects/asterisk/service/asterisk.service
+# RuntimeDirectory info: https://www.freedesktop.org/software/systemd/man/systemd.exec.html
+[Unit]
+Description=Asterisk PBX And Telephony Daemon
+After=network.target
+
+[Service]
+User=asterisk
+Group=asterisk
+# Add directroy /var/run/asterisk owned by the user and group
+# specified in User and Group respectively and delete it on daemon shutdown
+# Note /var/run is just a link to /run!
+RuntimeDirectory=asterisk
+# Add GOOGLE's API Key to asterisk's environment!
+# Make sure g_api_key.json belongs to asterisk:asterisk!
+Environment="HOME=/var/lib/asterisk" "GOOGLE_APPLICATION_CREDENTIALS=/home/vagrant/g_api_key.json"
+WorkingDirectory=/var/lib/asterisk
+ExecStart=/usr/sbin/asterisk -f -C /etc/asterisk/asterisk.conf
+ExecStop=/usr/sbin/asterisk -rx 'core stop now'
+ExecReload=/usr/sbin/asterisk -rx 'core reload'
+
+[Install]
+WantedBy=multi-user.target
+```
+
+## Facilitándonos la vida
+Para trabajar de una manera mucho más sencilla a la vez que conseguíamos una mejor integración con este repositorio de *GitHub* hemos optado por eliminar los archivos de configuración de la propia máquina de *vagrant* y sustituirlos por enlaces a los archivos que residen en el anfitrión de la máquina. Todo esto se hace posible gracias al directorio compartido con la máquina invitada a través de `/vagrant`. La idea de trabajar solo con `vim` nos parecía un poco abrumadora...
+
+## Notas sobre el uso de Linphone en Android
+Para ir probando nuestras configuraciones hemos empleado `Linphone`, un soft-phone de código abierto que se puede encontar en *Google Play*. Configurar cuentas es sencillo gracias a su "wizard" pero debemos tener cuidado con un par de detalles. En función de la versión el usuario configurado añade el prefijo `+34` (España) a todas las extensiones que marca. Como nostros no lo contemplamos debemos eliminarlo o ninguna llamada tendrá éxito...
+
+A la hora de hacer videollamadas debemos habilitar la opción que hace videollamadas por defecto ya que no hemos sido capaces de hacer funcionar una videollamada con el botón habilitado a tal efecto durante una llamada de voz.
+
+## Mini guía de Vagrant
+`Vagrant` es una herramienta que se sitúa justo encima de proveedores de virtualización como `VirtualBox` y que permiten automatizar la creación de máquinas virtuales. `Vagrant` recibe como entrada un archivo especial llamado `Vagrantfile` que describe las caracterísitcas de esta máquina. El que estamos empleando nosotros es:
+
+```ruby
+VAGRANTFILE_API_VERSION = "2"
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  config.vm.box = "ubuntu/bionic64"                 # Imagen que corre la máquina virtual
+  config.vm.provider "virtualbox" do |v|
+  config.vm.network "public_network"                # Configuramos la máquina para que sea visible dese la red a la que esté conectado el anfitrión
+  v.customize ["modifyvm", :id, "--memory", 1024]   # Configuramos la memoria de la máquina
+  end
+
+  config.vm.define "asterisk_pbx" do |asterisk_pbx|
+    asterisk_pbx.vm.hostname = 'asterisk-pbx'
+  end
+end
+```
+
+Lanzar la máquina es tan sencillo como ejecutar `vagrant up` desde el directorio que contenga el `Vagrantfile`. Para entrar en la máquina podemos ejecutar `vagrant ssh <nombre>` donde `<nombre>` es `asterisk_pbx` en nuestro caso. Para apagar la máquina debemos ejecutar `vagrant halt` y si queremos eliminarla completamente correremos `vagrant destroy`.
+
+Para conseguir esta herramienta nos basta con ejecutar `sudo apt install virtualbox vagrant` desde una sistema operativo basado en `Debian`: `Ubuntu`, `ElementaryOS`, `Debian`, `MXLinux`, `Pop!_OS`, `Zorin OS`, `Linux Mint`...
