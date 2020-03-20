@@ -23,7 +23,7 @@ Sabemos que `asterisk` cuenta con un script que instala todas estas dependencias
 Lo que hace el script de insatlación en definitiva es bajar las fuentes de `asterisk`, descomprimirlas y bajar las dependencias. Con todo esto ya estamos preparados para compilar este programa faraónico.
 
 ### Hora de compilar
-Los desarrolladores de `asterisk` han pensado en nosotros al haber preparado un `Makefile`. `Make` es una herramienta de `GNU` que automatiza la compilación de cualquier tipo de proyecto. Antes de poder emplear este `Makefile` debemos cerciorarnos de cumplir todos los requisitos para instalar el programa para lo que ejecutamos el script `configure` navegando hasta `/usr/share/asterisk` (el lugar al que habíamos descomprimido las fuentes) y ejecutamos `./configure`. Si como esperamos todo está correcto podemos pasar a compilar el programa con tan sólo invocar `make`. Dada la extensión del programa y toda la funcionalidad que aporta es posible que no requiramos alguno de los módulos que se incorporan para trabajar. Para seleccionar qué cargar y qué no podemos ejecutar `make menuselect` para entrar en un menú gráfico basado en `ncurses` en el que escoger lo que usar. Tras decidirnos con correr `make install` tendremos `asterisk` instalado. Además del propio programa queremos tener una configuración de la que partir para tener una base sobre la que trabajar. Ejecutando `make samples`se copiaran configuraciones de ejemplo a `/etc/asterisk` para que podamos empezar a trabajar.
+Los desarrolladores de `asterisk` han pensado en nosotros al haber preparado un `Makefile`. `Make` es una herramienta de `GNU` que automatiza la compilación de cualquier tipo de proyecto. Antes de poder emplear este `Makefile` debemos cerciorarnos de cumplir todos los requisitos para instalar el programa para lo que ejecutamos el script `configure` navegando hasta `/usr/share/asterisk` (el lugar al que habíamos descomprimido las fuentes) y ejecutamos `./configure`. Si como esperamos todo está correcto podemos pasar a compilar el programa con tan sólo invocar `make`. Dada la extensión del programa y toda la funcionalidad que aporta es posible que no requiramos alguno de los módulos que se incorporan para trabajar. Debemos prestar atención e incluir todos los módulos para trabajar con conectores **ODBC** (los explicaremos más adelante). Por defecto están todos incluidos. Para seleccionar qué cargar y qué no podemos ejecutar `make menuselect` para entrar en un menú gráfico basado en `ncurses` en el que escoger lo que usar. Tras decidirnos con correr `make install` tendremos `asterisk` instalado. Además del propio programa queremos tener una configuración de la que partir para tener una base sobre la que trabajar. Ejecutando `make samples`se copiaran configuraciones de ejemplo a `/etc/asterisk` para que podamos empezar a trabajar.
 
 Con todo preparado nos queda ejecutar el propio programa. Teniendo la seguridad en mente hemos decidido ejecutar `asterisk` como un servicio de `systemd` para lo que hemos tenido que dar algún paso más. Todo aparece documentado en el anexo. A partir de ahora asumiremos que `asterisk` está corriendo en segundo plano. Pasamos pues a lanzar una terminal de `asterisk` para poder obtener información útil para la configuración.
 
@@ -438,4 +438,65 @@ Database     = asterisk
 socket       = /var/run/mysqld/mysqld.sock
 ```
 
-El usuario y contraseña que hemos configurado para el usuario de la base de datos los indicaremos en un archivo de configuración posterior. Además indicamos que estuvimos un buen rato hasta encontrar ese escurridizo *socket*... Esto que acabamos de configurar es lo que se denomina **DSN** (**D**ata **S**ource **N**ame), una descripción del conector que nos permite utilizarlo. En los siguientes pasos tendremos que referirnos a a través del nombre `asterisk-mysql-cnx`.
+El usuario y contraseña que hemos configurado para el usuario de la base de datos los indicaremos en un archivo de configuración posterior. Además indicamos que estuvimos un buen rato hasta encontrar ese escurridizo *socket*... Esto que acabamos de configurar es lo que se denomina **DSN** (**D**ata **S**ource **N**ame), una descripción del conector que nos permite utilizarlo. En los siguientes pasos tendremos que referirnos a través del nombre `asterisk-mysql-cnx`.
+
+Podemos probar si hemos configurado todo correctamente ejecutando la siguiente orden donde las opciones son el nombre del **DSN** y el usuario y contraseña con el que conectarnos a la base de datos, en nuestro caso, `asterisk/asterisk`:
+
+```bash
+sudo isql -v asterisk-connector asterisk asterisk
+```
+
+El siguiente paso consiste en indicarle a `asterisk` dónde está esta descripción del conector cosa que configuramos en el archivo `res_odbc.conf`:
+
+```ini
+[ENV]
+[asterisk]
+enabled => yes
+dsn => asterisk-mysql-cnx
+username => asterisk
+password => asterisk
+pre-connect => yes
+```
+
+Es aquí donde indicamos el nombre del **DSN** y el usuario y contraseña a emplear así como habilitamos esta conexión. Si ahora entramos en la **CLI** de `asterisk` y recargamos el módulo **ODBC** con `module reload res_odbc.so` y después ejecutamos `odbc show` deberíamos ver que la conexión `asterisk` con **DSN** `asterisk-mysql-cnx` aparece por pantalla.
+
+Con esto ya tenemos a `asterisk` comunicado con el mundo exterior y la carga de usuarios desde la base de datos debería funcionar. También nos hemos animado a hacer peticiones a otras tablas de esta base de datos desde el plan de marcación.
+
+### Haciendo queries a otras tablas
+Para intentar llevar un control de las llamadas que se hacen a través de nuestra centralita decidimos crear la siguiente tabla:
+
+```sql
+CREATE TABLE `call_data` (
+  `call_number` int(11) NOT NULL AUTO_INCREMENT,
+  `caller_id` varchar(15) DEFAULT NULL,
+  `called_exten` varchar(10) NOT NULL,
+  PRIMARY KEY (`call_number`)
+);
+```
+
+En la que tenemos un identificador de llamada que se incrementa automáticamente y recogemos el nombre del llamante y  llamado. Para poder interactuar con esta tabla tenemos que configurar una función con la sintaxis `SQL` correcta que lo haga por nosotros cosa que conseguimos en el archivo `func_odbc.conf`:
+
+```ini
+[general]
+[SQL]           ; Define la función SQL en el plan de marcación
+dsn=asterisk    ; Usa la conexión asterisk definida en res_odbc.conf
+readsql=${ARG1} ; Ejecuta la query que se pasa como argumento
+```
+
+Está función que ya venía definida simplemente emplea la conexión `asterisk` definida en `res_odbc.conf` y acepta un parámetro desde el plan de marcación, la petición `SQL` completa que simplemente ejecuta. Podríamos definir un "envoltorio" para las funciones que queramos ofrecer al plan de marcación pero dado lo sencillas que son nuestras peticiones preferimos explicitarlas en el plan de marcación ya que creems que son fáciles de comprender y no dificultan el manejo del mismo.
+
+En el plan de marcación encontraremos pues líneas como:
+
+```ini
+; Extensión 100
+same => n,Verbose(${ODBC_SQL(INSERT INTO call_data (caller_id, called_exten) VALUES (\"${CALLERID(all):4:-1}\", ${GLOBAL(${EXTEN})})))
+
+; Subrutinas store-data y store-data-end (${ARG1} == ${EXTEN}, el parámetro se pasa desde la extensión de llamadas)
+exten => s,1,Verbose(${ODBC_SQL(INSERT INTO call_data (caller_id, called_exten) VALUES (\"${CALLERID(all):4:-1}\", ${GLOBAL(${ARG1})})))
+```
+
+En ellas simplemente llamamos a la función `ODBC_SQL()` (se añade el prefijo `ODBC` para garantizar que los nombres son únicos aunque podemos variarlo con la opción `prefix` en `func_odbc.conf`) y el parámetro que le pasamos es una query `SQL` normal y corriente donde empleamos variables del canal para obtener información significativa. Destacamos que como en las peticiones `SQL` las cadenas deben aparecer encerradas entre comillas (`""`) tenemos que escapar estos caracteres con `\`. No ocurre lo mismo con `${EXTEN}` ya que es un entero. Además de este detalle hemos querido "limpiar" el nombre del llamante ya que el valor crudo contenía `3` espacios antes del nombre y encerraba éste entre `<>`. Para ello cogemos solo los caracteres desde la posición `4` ignorando el último, de ahí el sufijo `:4:-1`.
+
+Además de esta línea de acción también podemos emplear scripts que se comuniquen sirectamente con estas bases de datos saltándonos toda la infraestructura de **ODBC** en el proceso. Hemos aplicado esta solución con una base da datos *MongoDB* que es *noSQL*. Lo comentaremos más adelnate. Nos metemos ahora de lleno con las colas de agentes.
+
+## Añadiendo colas de atención a usuarios
