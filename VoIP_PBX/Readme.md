@@ -320,3 +320,122 @@ La idea principal es saltar a las extensiones que se vayan introduciendo durante
 Con todo documentado podemos abordar el elefante en la habitación: la interconixión de `asterisk` con bases de datos externas a través de conectores **ODBC** (**O**pen **D**ata**B**ase **C**connectors).
 
 ## Un paso más allá: Interconexión con sistemas externos
+Por ahora solo nos las hemos visto con el propio `asterisk`. Uno de los porblemas que esto conlleva es lo estático de las configuraciones. Es decir, una vez que modifiquemos los usuarios de la centralita debemos volver a cambiar el archivo para cambiar sus características o aceptar terminales nuevos por ejemplo. Para intentar dotar a nuestro sistema de un grado más de dinamismo podemos intentar aprovechar la arquitectura de tiempo real de `asterisk` o [**ARA**](https://wiki.asterisk.org/wiki/display/AST/Realtime+Database+Configuration) que nos permite introducir nuevos usuarios a través de una base de datos externa.
+
+Por tanto nuestro objetivo principal es agregar usuarios dinámicamente a través de una base de datos. Teniendo esto siempre en mente vamos a ir relatando los pasos que debemos seguir para cumplir nuestro objetivo.
+
+### Cargando usuarios desde una base de datos
+Con el objetivo de facilitar la configuración de la base de datos externa a la vez que contar con mucha documentación que nos respalde hemos decidido emplear una base de datos relacional `MySQL`. Instalarla en un sistema basado en `Debian` es tan sencillo como ejecutar `sudo apt install mysql-server`. Podemos comprobar que tras la insrtalación todo está funcionando de manea correcta si ejecutamos `systemctl status mysql`. Debmos señalar que `MySQL` no es la propia base de datos en sí sino un sistema gestor de bases de datos que puede manejar varias a la vez. Nosotros hemos decidido ser poco originales y crear la base de datos `asterisk` para trabajar con la centralita. Hemos establecido además un usuario específico para que `asterisk` pueda comunicarse únicamente con la base de datos para la que debe tener acceso y como no podía ser de otra manera lo hemos llamado `asterisk` también.
+
+Para crear este usuario primero debemos iniciar una sesión como `root` en la consola de `mysql` ejecutando `sudo mysql -u root -p` y pulsando enter desde la propia shell. Dentro debemos ejecutar las siguientes órdenes para crear a este usuario así como la base de datos `asterisk`:
+
+```sql
+CREATE USER 'asterisk'@'localhost' IDENTIFIED BY 'asterisk';    -- Crea el usuario asterisk con contraseña asterisk
+CREATE DATABASE asterisk;                                       -- Crea la base de datos asterisk
+GRANT ALL PRIVILEGES ON asterisk.* TO 'asterisk'@'%';           -- Otorga los permisos necesarios al usuario asterisk en la DB asterisk
+quit;
+```
+
+A partir de ahora podemos manejar la base de datos iniciando sesión en el servidor de `mysql` con cualquiera de los dos usuarios. Si queremos entrar como `asterisk` el comando a aejecutar será `mysql -u asterisk -p`. Tan solo debemos introducir la contraseña anterior cuando se requiera. Ahora debemos darnos cuenta de que si `asterisk` puede obtener información de estas bases de datos entonces esperará recibirla a través de unas tablas bien definidas. Navegando por la wiki de `asterisk` llegamos a una de estas descripciones [aquí](https://wiki.asterisk.org/wiki/display/AST/SIP+Realtime%2C+MySQL+table+structure). Con tan solo ejecutar ese comando en la consola de la base de datos estaremos listos para funcionar. No obstante y si nos paramos a pensar en toda la información que hay nos puede empezar a dar vueltas la cabeza... Gracias a la documentación de [asterisk docs](http://www.asteriskdocs.org/en/3rd_Edition/asterisk-book-html-chunk/I_section12_tt1465.html) nos dimos cuenta de que con mucha menos información podíamos seguir funcionando. Entre esta información y los errores que mostraba la **CLI** de `asterisk` llegamos a la siguiente descripción de una tabla que si bien es mucho más concisa nos permite trabajar sin problema alguno:
+
+```sql
+CREATE TABLE `sipconf` (
+  `type` varchar(6) DEFAULT NULL,
+  `name` varchar(128) DEFAULT NULL,
+  `secret` varchar(128) DEFAULT NULL,
+  `context` varchar(128) DEFAULT NULL,
+  `host` varchar(128) DEFAULT NULL,
+  `ipaddr` varchar(128) DEFAULT NULL,
+  `port` varchar(5) DEFAULT NULL,
+  `regseconds` bigint(20) DEFAULT NULL,
+  `defaultuser` varchar(128) DEFAULT NULL,
+  `fullcontact` varchar(128) DEFAULT NULL,
+  `regserver` varchar(128) DEFAULT NULL,
+  `useragent` varchar(128) DEFAULT NULL,
+  `lastms` int(11) DEFAULT NULL,
+  `callbackextension` varchar(40) DEFAULT NULL
+);
+```
+
+Introducir un nuevo usuario se convierte por tanto en una sola query a esta tabla. El usuario que nosotros hemos usado de ejemplo es:
+
+```sql
+INSERT INTO `sipconf` (type, name, secret, context, host, defaultuser) VALUES ('friend','foodb','foodb','from-internal','dynamic','foodb');
+```
+
+Con lo anterior creamos un usuario idéntico a los que describíamos al principio del documento con nombre de usuario y contraseña `foodb/foodb`. El resto de columnas que no hemos rellenado serán establecidas por el propio `asterisk` cuando se registre este usuario. Recordemos que hemos establecido `host=dynamic`, esto es, el usuario se debe registrar... Si no tendríamos que rellenar más campos como la *IP* del terminal y demás.
+
+Con la base de datos preparada debemos dirigirnos al archivo `extconfig.conf` para habilitar la posibilidad de cargar estos usuarios desde una base de datos externa. Debemos incluir las siguientes líneas:
+
+```ini
+[settings]
+sippeers => odbc,asterisk,sipconf
+sipusers => odbc,asterisk,sipconf
+```
+
+Con esto le decimos a `asterisk` que también busque usuarios a través del driver `odbc` en la base de datos `asterisk` y en la tabla `sipconf`. Fijémonos en que cargamos tanto usuarios como peers desde la misma tabla porque tenemos un campo `type` que nos permite distinguir el tipo sin problema.
+
+Para que todo esto funcione como esperamos debemos habilitar la posibilidad de registrar usuarios de este modo en el archivo `sip.conf` para que se cargue su registro en memoria. De lo contrario solo podrían hacer llamadas... Podemos lograrlo con tan solo incluir:
+
+```ini
+rtcachefriends=yes
+```
+
+Con esto le decimos a `astrisk` que queremos que los usuarios que estén introducidos en la base de datos se incluyan en la memoria del programa solo cuando estos se registren. Por eso si ejecutamos `sip show peers` sin que se haya registrado nadie no observaremos ningún cambio hasta que el terminal en cuestión "inicie sesión". En otras palabras, se tratará igual a los usuarios del archivo de confiugración y a los que vienen de la base de datos una vez que estos últimos se hayan registrado.
+
+Finalmente debemos recargarel manejador del canal desde la terminal de `asterisk` con `module reload chan_sip.so` y todo está listo para funcionar. Solo nos queda explicar cómo conseguir que `asterisk` sea capaz de comunicarse con esta base de datos externa.
+
+### Comunicando a `asterisk` con el exterior: conectores **ODBC**
+Dada la cantidad de bases de datos que existen debemos de alguna manera generar una interfaz que homogenice el acceso a cualquiera de ellas. Es por eso que aparecen los conectores **ODBC** que nos permiten insertarlos entre `asterisk` y el sistema gestor de bases de datos en cuestión para que pueda traducir las peticiones y repuestas para cada uno de los dos sistemas. Para ello debemos instalar la implementación de estos conectores para sistemas UNIX junto con sus dependencias. Lo podemos lograr con tan solo ejecutar:
+
+```bash
+sudo apt update && sudo apt -y install unixodbc libltdl7 libltdl-dev
+```
+
+Después tendremos que navegar hasta la página web de MySQL para descargar su propio conector ODBC desde [aquí](https://dev.mysql.com/downloads/connector/odbc/) para la versión correcta (la nuestra es la `18.04 Bionic Beaver`). Depués podemos seguir la guía de instalación de la [documentación](https://dev.mysql.com/doc/connector-odbc/en/connector-odbc-installation-binary-unix-tarball.html) que puede resumirse en las siguientes instrucciones ejecutadas desde un directorio que contenga el archivo descargado:
+
+```bash
+tar -xvf mysql_odbc_connector.tar.gz
+cd mysql-connector-odbc-8.0.19-linux-ubuntu18.04-x86-64bit/
+sudo cp bin/* /usr/local/bin/
+sudo cp lib/* /usr/local/lib/
+sudo myodbc-installer -a -d -n "MySQL_ODBC" -t "Driver=/usr/local/lib/libmyodbc8w.so"
+```
+
+Podemos comprobar que la instalación ha ido correctamente ejecutando la siguiente orden y comporbando que aparece el nombre que hemos pasado anteriormente `MySQL_ODBC`.
+
+```bash
+myodbc-installer -d -l
+```
+
+Debemos comentar que estos dirvers **ODBC** se distribuyen con versiones capaces de manejar solo caracteres `ASCII`, que son algo más rápidas y otras capaces de lidiar con caracteres **Unicode**. Dado que somos españoles y puede que alguien introduzca caracteres no ASCIII hemos preferido emplear esta segunda opción. Si se quiere la primera tan solo tendríamos que cambiar la cadena `"Driver=/usr/local/lib/libmyodbc8w.so"` por `"Driver=/usr/local/lib/libmyodbc8a.so"` en el proceso de instalación.
+
+Ahora debemos indicarle a `unixodbc` dónde esta este nuevo driver que hemos configurado. Para ello debemos modificar el archivo `/etc/odbcinst.ini` e incluir lo siguiente:
+
+```ini
+[MySQL_ODBC]
+Description = ODBC Connector for MySQL
+Driver      = /usr/local/lib/libmyodbc8w.so
+UsageCount  = 1
+Pooling     = yes
+```
+
+Solo "apuntamos" `unixodbc` contra el driver que acabamos de instalar. Podemos comprobar que lo hemos instlado correctamente si ejecutamos:
+
+```bash
+odbcinst -q -d
+```
+
+Nos queda describir de alguna manera esta conexión para que `asterisk` pueda utilizarla. Todo ello se puede hacer a través del archivo `/etc/odbc.ini` en el que le indicamos a `asterisk` qué driver emplear para conectarse, dónde está el *socket* de conexión, su usuario, la base de datos que debe emplear... Al final debemos acabar con algo como:
+
+```ini
+[asterisk-mysql-cnx]
+Driver       = MySQL_ODBC
+Description  = MySQL connection for asterisk
+server       = localhost
+port         = 3306
+Database     = asterisk
+socket       = /var/run/mysqld/mysqld.sock
+```
+
+El usuario y contraseña que hemos configurado para el usuario de la base de datos los indicaremos en un archivo de configuración posterior. Además indicamos que estuvimos un buen rato hasta encontrar ese escurridizo *socket*... Esto que acabamos de configurar es lo que se denomina **DSN** (**D**ata **S**ource **N**ame), una descripción del conector que nos permite utilizarlo. En los siguientes pasos tendremos que referirnos a a través del nombre `asterisk-mysql-cnx`.
