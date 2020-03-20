@@ -229,14 +229,14 @@ Una aplicación muy sencilla que simplemente reproduce un mensaje al llamante cu
 [from-internal]
 ; Hello World (a.k.a General Tests)
 exten => 100,1,Answer()                 ; Asterisk descuelga el la línea
-     same => n,Wait(1)                  ; Espera 1 segundo para dar tiempo al terminal a prepararse
-     same => n,Playback(hello-world)    ; Reproduce un mensaje de vuelta al llamante
-	 same => n,Wait(1)                  ; Espera 1 segundo para no cortar el final del mensaje
-	 same => n,Hangup()                 ; Cuelga la llamada
+    same => n,Wait(1)                   ; Espera 1 segundo para dar tiempo al terminal a prepararse
+    same => n,Playback(hello-world)     ; Reproduce un mensaje de vuelta al llamante
+    same => n,Wait(1)                   ; Espera 1 segundo para no cortar el final del mensaje
+    same => n,Hangup()                  ; Cuelga la llamada
 ```
 
 Nótese que hemos eliminado una línea que accede a una base de datos ya que no nos aporta nada por ahora. Se han explicado las aplicaciones empleadas con comentarios a su lado. Además 
-llamamos la atención al contexto bajo el que se encuadra la extensión que incluimos que no es otro que el que señalábamos al definir los usuarios de nuestra centralita, `from-internal`. Finalmente señalamos que el parámetro que le pasamos a la aplicación `Playback()` es un archivo de audio (sin la extensión) que se encuentra en los directiorios `/var/lib/asterisk/sounds/<idioma>` donde `<idioma>` puede ser `en` o `es` para inglés y español respectivamente entre otras.
+llamamos la atención al contexto bajo el que se encuadra la extensión que incluimos que no es otro que el que señalábamos al definir los usuarios de nuestra centralita, `from-internal`. Todas las extensiones que describamos a partir de ahora pertenecen a este contexto a no ser que se explicite lo contrario. Así conseguimos ser lo más fieles posbles a la configuración real que se encuentra en los archivos de este repositorio. Finalmente señalamos que el parámetro que le pasamos a la aplicación `Playback()` es un archivo de audio (sin la extensión) que se encuentra en los directiorios `/var/lib/asterisk/sounds/<idioma>` donde `<idioma>` puede ser `en` o `es` para inglés y español respectivamente entre otras.
 
 Por ahora nos centraremos en la forma de hacer una llamada normal a través de la aplicación `Dial()`. Aprovecharemos también para incluir los conceptos de variables globales y subrutinas además de mostrar un ejemplo de extensiones con comodines:
 
@@ -253,7 +253,7 @@ Por ahora nos centraremos en la forma de hacer una llamada normal a través de l
 exten => _2XX,1,Set(peer_name=${GLOBAL(${EXTEN})})                  ; Asigna un valor determinado a la variable 'peer_name'
     same => n,GotoIf($["${peer_name}" = ""]?wrong_peer,1)           ; Si la extensión llamada no corresponde a nadie salta a la extensión 'wrong-peer'
     same => n,gosub(store-data,s,1,(${EXTEN}))                      ; Antes de llamar llama a la subrutina 'store-data'
-    same => n,Dial(SIP/${GLOBAL(${EXTEN})},10,tm(native-random))    ; Llama al usuario requerido
+    same => n,Dial(SIP/${peer_name},10,tm(native-random))    ; Llama al usuario requerido
     same => n,VoiceMail(${EXTEN})                                   ; Si no coge la llamada dejamos un mensaje de voz
 
 exten => wrong_peer,1,Verbose(2,Called a wrong peer...)             ; Escribe en la CLI un mensaje
@@ -267,3 +267,40 @@ exten => s,1,Verbose(${ODBC_SQL(INSERT INTO call_data (caller_id, called_exten) 
     same => n,AGI(update_mongo_db.py,${GLOBAL(${ARG1})})                                                                        ; Llama a un script externo
     same => n,Return()                                                                                                          ; Vuelve a la extensión que nos llamó
 ```
+
+A pesar de que parece que la extensión es muy complicada veremos cómo en realidad no es nada más que un tema de orden. La extensión `_2XX` es un patrón (empieza con `_`) que coincide con los números en el intervalo `[200, 299]`, es decir, `X` sustituye a un dígito cualquiera. Nada más entrar por esta extensión fijamos el valor de una variable para este canal, `peer_name`. En vez de tener que reescribir esta extensión para cada usuario hemos creado una zona de variables globales (justo debajo de `[globals]`) que nos permite traducir los valores numéricos a nombres de usuario. Cada canal tiene una serie de [variables básicas](https://wiki.asterisk.org/wiki/display/AST/Asterisk+Standard+Channel+Variables) que podemos emplear para obtener información. Lo único que hacemos es obtener el valor de la variable global que identificamos con la extensión que ha sido llamada. En el plan de marcación accedemos al valor de variables a través del "operador" `${}` con lo que `${EXTEN}` nos devuelve el valor de la extensión marcada. La "función" `GLOBAL(X)` nos devuelve el valor de la variable global identificada por `X` y asignamos al valor a la variable del canal que definimos con el operador `${}` de nuevo (sí, la sintaxis es bastante fea).
+
+En caso de que este identificador no se encuentre en el área de variables globales `GLOBAL(X)` devolverá una cadena vacía (`""`) con lo que podemos usarlo de condición en un salto condicional. Si la condición se cumple saltaremos a una extensión preparada para manejar la situación y simplemente colgar al llamante tras informarle de que unas comadrejas se han comido el equipo telefónico... En caso contrario llamamos a la subrutina `store-data` yendo a su extensión `s` y prioridad `1`. Además pasamos la extensión llamada como argumento ya que el salto implica un cambio de extensión al fin y al cabo y si no no podríamos recuperarla... En la subrutina primero introducimos unos datos en la base de datos *MySQL* y luego llamamos a un script que interacciona con una base de datos *MongoDB* pra luego volver al punto en el que estábamos. Explicaremos estas aplicaciones en profundidad más adelante.
+
+De nuevo en la extensión inicial nos limitamos a llamar al usuario que habíamos obtenido antes durante un periodo máximo de `10` segundos. Además permitimos al llamado redireccionar la llamada con la opción `t` (más adelante lo comentaremos) y reproducimas música de la clase `native-random` al llamado a través de la opción `m`. En breve comentaremos qué es esto de las clases de música.
+
+Si el llamado no contesta en `10` segundos entonces pasamos a ejecutar la siguiente aplicación que permitirá al llamante dejar un mensaje de voz en el buzón asociado a la extensión llamada. Pasamos a hora a comentar la configuración y uso de estos buzones de voz.
+
+Con todo hemos cubierto bastante terreno con esta extensión que si bien podría ser más sencilla hemos sido capaces de afinar su funcionamiento haciendo uso de vairas caractarísticas del propio plan de marcación.
+
+### Utilizando buzones de voz
+Antes hemos visto cómo dejar mensajes en los buzones de voz con lo que solo necesitamos saber cómo se configuran y como puede cualquier usuario acceder a ellos. La configuración es muy sencilla y se hace a través del archivo `voicemail.conf`. Tan solo debemos configurar entradas como:
+
+```ini
+[default]
+200 => 123, Alice, foo@foo
+201 => 123, Pablo, foo@gmail.com
+202 => 123, Foo, vagrant@localhost
+203 => 123, FooDB, vagrant@localhost
+```
+
+Así, el buzón de voz asociado a la extensión `200` tiene la contraseña `123` para acceder, pertenece a `Alice` y las notificaciones pertinentes por correo se enviarán a `foo@foo`. La idea es idéntica para los demás casos y es la extensión definida en este documento la que se emplea al invocar a la aplicación `VoiceMail()` del plan de marcaciones. Si somos estrictos deberíamos pasar como argumento a `VoiceMail()` la cadena `extension@mail_context` donde `mail_context` es `default` en nuestro caso. No obstante si se omite esta segunda parte se supone que el contexto es en efecto `default` con lo que nos podemos ahorrar incluirlo. Dado que este documento es público hemos ocultado la dirección de correo veraz de *gmail* pero señalamos que los correos se envian de manera correcta. Tan solo hemos tenido que instalar en el sistema el programa `sendmail` (en sistemas basados en debian basta con ejecutar `sudo apt install sendmail`) ya que es el que emplea `asterisk` para enviar correos tal y como aparece recogido en la opción `mailcmd` del mismo archivo. El resto de las opciones que hemos empleado eran las que venían por defecto. Destacamos que los correos que nos llegan continen como adjunto el mensaje de voz.
+
+Solo nos queda habilitar una extensión para que los usuarios puedan escuchar sus mensajes. En `extensions.conf` hemos incluido:
+
+```ini
+; Access left Voice Messages
+exten => 400,1,VoiceMailMain()  ; Lanza el contestador
+    same => n,Hangup()          ; Cuelga la llamada al acabar
+```
+
+Llamando a la extensión `400` simplemente se invoca una aplicación automatizada que le requerirá a cada usuario el número de su buzón de voz (extensión asociada) y la contraseña definida en `voicemail.conf`. Tras ello se entra en un menú guiado.
+
+Si bien podía parecer intimidante en un principio hemos visto que configurar los buzones de voz ha sido relativamente sencillo. Pasamos a comentar las llamadas en grupo.
+
+### Llamadas en grupo
