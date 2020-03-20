@@ -33,16 +33,16 @@ sudo chown -R asterisk:asterisk /usr/sbin/asterisk
 # Connecting to the daemon can be done in one of 2 ways
 	# Alter the permissions for /var/run/asterisk/asterisk.ctl
 		# Add the user who's going to connect to the asterisk group (you need to log out and back!)
-		useradd -a -G asterisk vagrant
+		# useradd -a -G asterisk vagrant
 
 		# Change the permissions for /var/run/asterisk/asterisk.ctl
-		sudo chmod 0771 /var/run/asterisk/asterisk.ctl
+		# sudo chmod 0771 /var/run/asterisk/asterisk.ctl
 
 		# Connect with asterisk -rvvvvv
 
 	# Run the connection command as asterisk itself
 		# Change asterisk's user password: asterisk-asterisk
-		echo -e 'asterisk\nasterisk' | sudo passwd asterisk
+		# echo -e 'asterisk\nasterisk' | sudo passwd asterisk
 
 		# Run the command and enter said password
-		su -c 'asterisk -rvvvvv' -l asterisk
+		# su -c 'asterisk -rvvvvv' -l asterisk
