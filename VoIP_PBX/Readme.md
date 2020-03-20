@@ -491,7 +491,7 @@ En el plan de marcación encontraremos pues líneas como:
 ; Extensión 100
 same => n,Verbose(${ODBC_SQL(INSERT INTO call_data (caller_id, called_exten) VALUES (\"${CALLERID(all):4:-1}\", ${GLOBAL(${EXTEN})})))
 
-; Subrutinas store-data y store-data-end (${ARG1} == ${EXTEN}, el parámetro se pasa desde la extensión de llamadas)
+; Subrutinas store-data y store-data-end (${ARG1} == ${EXTEN}), el parámetro se pasa desde la extensión de llamadas)
 exten => s,1,Verbose(${ODBC_SQL(INSERT INTO call_data (caller_id, called_exten) VALUES (\"${CALLERID(all):4:-1}\", ${GLOBAL(${ARG1})})))
 ```
 
@@ -500,3 +500,78 @@ En ellas simplemente llamamos a la función `ODBC_SQL()` (se añade el prefijo `
 Además de esta línea de acción también podemos emplear scripts que se comuniquen sirectamente con estas bases de datos saltándonos toda la infraestructura de **ODBC** en el proceso. Hemos aplicado esta solución con una base da datos *MongoDB* que es *noSQL*. Lo comentaremos más adelnate. Nos metemos ahora de lleno con las colas de agentes.
 
 ## Añadiendo colas de atención a usuarios
+Con el objetivo de emular un sistema de atención a clientes hemos preparado una cola en la que se registran `1` o más agentes que se encargarán de atender estas llamadas. El primer paso que debemos dar es el de generar estos agentes a través del archivo `sip.conf`. Al igual que al comienzo hemos utilizado una plantilla que nos permite instanciarlos:
+
+```ini
+[queue_agent](!)
+type=peer       ; Los agentes solo reciben llamadas
+context=agents  ; Contexto para evitar colisiones con el plan de marcación principal
+host=dynamic
+secret=agent
+disallow=all
+allow=ulaw
+callcounter=yes ; Debemos permitir que asterisk monitorice el estado del usuario. Sin esta opción las pistas (más abajo) no funcionan.
+
+[foo_agent](queue_agent)
+
+[fuu_agent](queue_agent)
+```
+
+Con los agentes creados pasamos a generar la cola de atención a la que irán llegando los distintos usuarios. Todo ello se configura en el archivo `queues.conf`:
+
+```ini
+[queue_template](!)
+musicclass=native-random    ; Escogemos la clase de música en espera para la cola
+strategy=rrmemory           ; Escogemos agentes de acuerdo a un Round Robin con Memoria
+joinempty=yes               ; Permitimos entrar en la cola si no hay agentes disponibles
+leavewhenempty=no           ; No echamos a gente de la cola cuando no haya agentes disponibles
+ringinuse=no                ; No alertes a agentes que ya estén en una llamada
+
+[foo](queue_template)
+```
+
+Al igual que antes instanciamos una cola a través de una plantilla. Podemos comentar que la estrategia de `Round Robin con Mmeoria` implica que cada vez es un agente nuevo el que coge las llamadas y recordamos quién ha cogido la última para continuar por el siguiente. Si recargamos el módulo de las colas con `module reload app_queue.so` y ejecutamos `queue show` en la **CLI** de `asterisk` observaremos cómo aparce la cola `foo` sin agentes asignados todavía...
+
+Es muy importante que seamos capaces de determinar si un agente está o no ocupado. Para ello debermos configurar lo que `asterisk` denomina *pistas* ([*hints*](https://wiki.asterisk.org/wiki/display/AST/Extension+State+and+Hints)) en el plan de marcación. Para poder asociar el estado de una extensión al estado de un terminal debemos establecer las relaciones a través de pistas. Éstas se incluyen en un contexto específico que definimos en `sip.conf`:
+
+```ini
+subscribecontext = queue-agents
+```
+
+Las pistas que necesitamos nostros son:
+
+```ini
+[queue-agents]
+exten => foo_agent,hint,SIP/foo_agent
+exten => fuu_agent,hint,SIP/fuu_agent
+```
+
+Si ejecutamos `core show hints` veremos que están cargados correctamente y el esatado de las extensiones. Ahora si llamamos a la extensión de una cola y ambos terminales de los agentes están ocupados entonces se asume que la extensión también está ocupada y el usuario pasa a estar encolado. Con todo preparado debemos asignar agentes a la cola a través de la **CLI** de `asterisk` ejecutando `queue add member <usuario> to <cola>` donde `<usuario>` es `SIP/foo_agent` o `SIP/fuu_agent` y la `<cola>` es `foo`. Si ejecutamos de nuevo `queue show` veremos que tenemos a los agentes asignados. También podemos eliminar agentes a través de la orden `queue remove member <usuario> from <cola>`.
+
+Con todo listo debemos habilitar extensiones para entrar en la cola. Si empleamos una extensión genérica par soportar varias colas y además añadimos una pequeña comprobación para evitar llamar a colas no existentes llegaremos a un plan de marcación como:
+
+```ini
+[globals]
+; Queue Extension <--> Queue Name Mappings
+Q_50=foo
+
+[from-internal]
+; Dial us into queues
+exten => _5X,1,Verbose(2, Going to a queue, hopefully)      ; Imprime un mensaje por la CLI
+    same => n,Set(req_queue=${GLOBAL(Q_${EXTEN})})          ; Fijamos el valor de req_queue al de la variable global identificada por Q_${EXTEN}
+    same => n,GotoIf($["${req_queue}" = ""]?wrong_queue,1)  ; Comprueba si la cola existe
+    same => n,Verbose(2,Going into Queue ${req_queue})      ; Imprime un mensaje por la CLI
+    same => n,Queue(${req_queue})                           ; Enviamos la llamada a la cola marcada
+    same => n,Hangup()                                      ; Colgamos la llamada
+
+exten => wrong_queue,1,Playback(tt-weasels)                 ; Si la cola no existe reproduce un sonido
+    same => n,Wait(1)                                       ; No finalices la reproducción prematuramente
+    same => n,Hangup()                                      ; Cuelga la llamada
+```
+
+La lógica detrás del plan de marcación es análoga a la que habíamos visto con las llamadas con lo que no queremos extendernos más para no aportar nada nuevo. También podríamos automatizar el proceso de asignación de agentes a colas tal y como aparece en la página de la [wiki](https://wiki.asterisk.org/wiki/display/AST/Building+Queues) de `asterisk` que hemos usado como fuente pero hemos creido que merecía más la pena implementar otras funcionalidades dado lo simple de nuestro escenario.
+
+## Interconectando dos PBX con el protocolo IAX
+### TODO: Esperemos a llevarlo a la práctica para ver cómo sale todo...
+
+## Integración con la **AGI**: **A**sterisk **G**ateway **I**nterface
