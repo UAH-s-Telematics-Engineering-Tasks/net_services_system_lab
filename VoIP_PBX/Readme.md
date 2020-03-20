@@ -574,4 +574,100 @@ La lógica detrás del plan de marcación es análoga a la que habíamos visto c
 ## Interconectando dos PBX con el protocolo IAX
 ### TODO: Esperemos a llevarlo a la práctica para ver cómo sale todo...
 
-## Integración con la **AGI**: **A**sterisk **G**ateway **I**nterface
+## Integración con la [**AGI**](https://wiki.asterisk.org/wiki/pages/viewpage.action?pageId=32375589): **A**sterisk **G**ateway **I**nterface
+La **AGI** no es más que una interfaz que permite a aplicaciones externas manipular el canal de una llamada a través de librerías. Nosotros hemos elegido emplear `Python` y la librería `Pyst2` para llevar a cabo estas funciones. Para poder trabajar con `Pyst2` debemos instalarlo. Con tan solo ejecutar el siguiente comando tendremos todo listo:
+
+```bash
+sudo pip3 install pyst2
+```
+
+Un pequeño programa que muestra un manejo básico de esta interfaz es:
+
+```python
+#!/usr/bin/python3                                          # Le indicamos a la shell que este archivo es para el
+                                                                # intérprete de Python3
+import asterisk.agi as agi                                  # Importamos la librería
+
+def main():
+    agi_inst = agi.AGI()                                    # Instanciamos la clase AGI
+    agi_inst.verbose("Printing available channel values")   # Imprime mensajes a la CLI
+    agi_inst.verbose(str(agi_inst.env))                     # Consultamos el diccionario de variables del canal
+    callerId = agi_inst.env['agi_callerid']                 # Obtenemos el nombre del llamante
+    agi_inst.verbose("call from %s" % callerId)             # Imprimimos el nombre a la CLI
+    while True:
+        agi_inst.stream_file('vm-extension')                # Reproduce un archivo (como Playback())
+        result = agi_inst.wait_for_digit(-1)                # Esperamos indefinidamente a que se introduzca un número
+        agi_inst.verbose("got digit %s" % result)           # Lo imprimimos por pantalla
+        if result.isdigit():                                # Si es un dígito
+            agi_inst.say_number(result)                     # Lo reproducimos al llamante
+        else:
+            agi_inst.verbose("bye!")                        # Si no lo es
+            agi_inst.hangup()                               # Colgamos la llamada
+            agi_inst.exit()                                 # Salimos del programa
+
+
+if __name__ == '__main__':
+    main()                                                  # Solo ejecutamos main() si se llama explícitamente al programa
+```
+
+Señalamos que todos los scripts empleados se encuentran en la carpeta `Asterisk_scripts`. Se observa que esto nos permite dar una vuelta de tuerca más a toda la lógica del plan de marcación. Habilitar una extensión par llamar a este programa solo implica escribir:
+
+```ini
+; Tests for AGI applications
+exten => 800,1,Answer()
+    same => n,AGI(agi_test.py)
+```
+
+`Asterisk` busca estos scripts por defecto en `/var/lib/asterisk/agi-bin`. Además, los archivos deben ser ejecutables con lo que debemos cambiar los permisos con `sudo chmod +x <script>`.
+
+Empleando justamente estas ideas hemos implementado una conexión con una base de datos *MongoDB* desde una script como éste que llamamos ante cualquier llamada. Para instalar la base de datos tan solo tenemos que ejecutar `sudo apt install mongodb`. Podemos abrir una conexión contra la base con `mongo` desde una shell cualquiera. Destacamos que al ser una base **noSQL** (**n**ot-**o**nly**SQL**) la sintaxis de los comandos es algo distinta. Con mongo las bases de datos se componen de colecciones y estas a su vez de documentos. Se emplea una sintaxis **JSON** para describir estos objetos y éstos se almacenan como objetos de *JavaScript* codificados de manea binaria (**BSON**). A través de esta conexión podemos crear la base de datos y la colección aunque no veremos nada hasta que se cree el primer documento. *MongoDB* es "perezosa" a la hora de crear infraestructura...
+
+Para crear una base de datos basta con ejecutar los siguientes comandos desde la shell de *MongoDB*:
+
+```javascript
+use asterisk_data                                                           // Crea la base de datos asterisk_data
+db.call_data.insertOne({caller: "foo", called: "fuu", chargeable: true})    // Crea la colección call_data e inserta un documento
+```
+
+A través de la librería `pymongo` podemos automatizar todo desde `python`. Instalamos `pymongo` con `sudo pip3 install pymongo` y podemos entonces escribir scripts que aprovechen la **AGI** como:
+
+```python
+#!/usr/bin/python3
+
+import pymongo                                                              # Importa la librería pymongo
+import asterisk.agi as agi
+
+chargeable_endpoints = ['pablo', 'alice']                                   # Usuarios por los que cobramos al llamar
+
+def main():
+    agi_inst = agi.AGI()
+
+    agi_inst.verbose("Connecting to MongoDB")
+    mongo_client = pymongo.MongoClient('localhost', 27017)                  # Nos conectamos a la base de datos que está corriendo
+
+    agi_inst.verbose("Retrieving Call Data")
+    calls = mongo_client.asterisk_data.call_data                            # Recibimos la colección de datos de llamadas
+
+    agi_inst.verbose("Got the collection")
+
+    gathered_data = {                                                       # Aprovechamos las variables del canal para obtener datos
+            "caller": agi_inst.env['agi_callerid'],
+            "called": agi_inst.env['agi_arg_1'],
+            "chargeable": agi_inst.env['agi_arg_1'] in chargeable_endpoints # Si el llamado está en la lista 'chargeable_endpoints' devuelve true
+        }
+
+    agi_inst.verbose("Gathered data: " + str(gathered_data))
+
+    calls.insert_one(gathered_data)                                         # Escribimos los datos recogidos a la base de datos
+
+    agi_inst.verbose("Inserted data. Time to go!")
+
+if __name__ == '__main__':
+    main()
+```
+
+Este script se llama en la subrutina `store-data` del plan de marcación y se le pasan como argumento el nombre del llamado. El hecho de poder pasar argumentos aporta mucha potencia al uso de la **AGI**.
+
+```ini
+same => n,AGI(update_mongo_db.py,${GLOBAL(${ARG1})})
+```

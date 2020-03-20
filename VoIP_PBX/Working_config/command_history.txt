@@ -207,59 +207,352 @@
   207  vim extensions.conf
   208  sudo vim extensions.conf
   209  exit
-  210  sl
-  211  ls
-  212  systemctl status asterisk.service
-  213  sudo systemctl start asterisk.service 
-  214  systemctl status asterisk.service
-  215  c
-  216  clear
-  217  su -c "asterisk -rvvvvv" -l asterisk
-  218  sudo wget -O /var/lib/asterisk/sounds/en/extra-en.zip https://www.asterisksounds.org/sites/asterisksounds.org/files/sounds/en/download/asterisk-sounds-extra-en-2.9.15.zip
-  219  vim /var/lib/asterisk/agi-bin/agi_test.py 
-  220  clear
-  221  sudo mkdir /var/lib/asterisk/sounds/es
-  222  cd /var/lib/asterisk/sounds/
-  223  ñs
-  224  ls
-  225  cd es/
-  226  ls
-  227  unzip core-es.zip 
-  228  sudo apt install unzip
-  229  unzip core-es.zip 
-  230  sudo unzip *.zip
-  231  ls
-  232  sudo unzip core-es.zip 
-  233  sudo unzip extra-es.zip 
-  234  ls
-  235  cd ../
-  236  cd en/
-  237  sudo unzip extra-en.zip 
-  238  cd ../
-  239  cd ..
-  240  sudo chown -R asterisk:asterisk sounds/
-  241  clear
-  242  cd /etc/asterisk/
-  243  mysql -p -u asterisk
-  244  su -c "asterisk -rvvvvv" -l asterisk
-  245  mysql -p -u asterisk
-  246  sudo apt install mongodb
-  247  mysql -p -u asterisk
-  248  nc -N 192.168.1.34 1234 < /tmp/recording.wav 
-  249  nc -N 192.168.1.49 1234 < /tmp/recording.wav 
-  250  sudo pip3 install google-cloud-speech
-  251  history | grep pip
-  252  cd
-  253  nc -l 1234 > g_api_key.json
-  254  vim .bashrc 
-  255  pwd
-  256  fg
-  257  . .bashrc 
-  258  env | grep GOOGLE
-  259  cat .bashrc 
-  260  cp .bashrc /vagrant/Working_config/
-  261  cd /etc/
-  262  cp odbc* /vagrant/Working_config/
-  263  cd asterisk/
-  264  cp sip.conf extensions.conf extconfig.conf func_odbc.conf features.conf voicemail.conf /vagrant/Working_config/
-  265  history > /vagrant/Working_config/command_history.txt
+  210  c
+  211  cd /etc/asterisk/
+  212  c
+  213  clear
+  214  ls
+  215  vim extensions.conf
+  216  ip a
+  217  c
+  218  clear
+  219  ls /vagrant/
+  220  ls /vagrant/Asterisk_setup/
+  221  vim /vagrant/Asterisk_setup/Insatall_es_n_extra_audio.sh 
+  222  fg
+  223  vim sip.conf
+  224  sudo vim sip.conf
+  225  fg
+  226  su -c "asterisk -rvvvvv" -l asterisk
+  227  c
+  228  clear
+  229  fg
+  230  ls /var/lib/asterisk/agi-bin/
+  231  ls -l /var/lib/asterisk/agi-bin/
+  232  vim /var/lib/asterisk/agi-bin/
+  233  vim /var/lib/asterisk/agi-bin/agi_test.py 
+  234  fg 1
+  235  su -c "asterisk -rvvvvv" -l asterisk
+  236  clear
+  237  jobs
+  238  fg 2
+  239  jobs
+  240  fg
+  241  cat /vagrant/Asterisk_setup/Insatall_es_n_extra_audio.sh 
+  242  clear
+  243  cat /vagrant/Asterisk_setup/Insatall_es_n_extra_audio.sh 
+  244  clear
+  245  su -c "asterisk -rvvvvv" -l asterisk
+  246  clear
+  247  sudo vim extconfig.conf 
+  248  vim sip.conf
+  249  sudo vim sip.conf
+  250  su -c "asterisk -rvvvvv" -l asterisk
+  251  sudo vim sip.conf
+  252  sudo vim func_odbc.conf 
+  253  sudo vim res_odbc.conf 
+  254  sudo vim func_odbc.conf 
+  255  sudo vim res_odbc.conf 
+  256  sudo vim func_odbc.conf 
+  257  sudo vim extensions.conf
+  258  su -c "asterisk -rvvvvv" -l asterisk
+  259  sudo vim extensions.conf
+  260  su -c "asterisk -rvvvvv" -l asterisk
+  261  fg
+  262  su -c "asterisk -rvvvvv" -l asterisk
+  263  fg
+  264  sudo apt install festival
+  265  fg
+  266  jobs
+  267  fg 1
+  268  jobs
+  269  sudo vim extconfig.conf 
+  270  sudo vim func_odbc.conf 
+  271  sudo vim extconfig.conf 
+  272  sudo mv sip.conf sip.conf.bak
+  273  cat sip.conf.bak 
+  274  :q
+  275  sudo vim extensions.conf
+  276  fg
+  277  jobs
+  278  sudo vim extconfig.conf 
+  279  cat res_odbc.conf 
+  280  cat func_odbc.conf 
+  281  sudo mv sip.conf.bak sip.conf
+  282  ls sip*
+  283  sudo vim sip.conf 
+  284  jobs
+  285  fg 2
+  286  vim extconfig.conf 
+  287  sudo vim extconfig.conf 
+  288  sudo vim sip.conf 
+  289  fg
+  290  cat sip.conf 
+  291  fg
+  292  sudo vim extensions.conf
+  293  vim /var/lib/asterisk/agi-bin/get_rfc.py
+  294  man ln
+  295  sudo ln -s /vagrant/Asterisk_scripts/get_rfc.py /var/lib/asterisk/agi-bin/get_rfc.py
+  296  cat /var/lib/asterisk/agi-bin/get_rfc.py 
+  297  cat /tmp/email.txt 
+  298  man sendmail
+  299  . ~/.bashrc
+  300  sudo vim /etc/systemd/system/asterisk.service 
+  301  sudo systemctl stop asterisk.service 
+  302  sudo systemctl daemon-reload 
+  303  sudo systemctl stop asterisk.service 
+  304  sudo systemctl start asterisk.service 
+  305  systemctl status asterisk.service 
+  306  sudo mv queues.conf queues.conf.back
+  307  sudo cp queues.conf.back /vagrant/Working_config/queues.conf
+  308  sudo ln -s /vagrant/Working_config/queues.conf queues.conf
+  309  cp musiconhold.conf /vagrant/Working_config/
+  310  sudo mv musiconhold.conf musiconhold.conf.bak
+  311  sudo ln -s /vagrant/Working_config/musiconhold.conf musiconhold.conf
+  312  head queues.conf
+  313  x
+  314  exit
+  315  clear
+  316  su -c "asterisk -rvvvvv" -l asterisk
+  317  . .bashrc 
+  318  su -c "asterisk -rvvvvv" -l asterisk
+  319  su -c "env | grep GOO" -l asterisk
+  320  su -c "export foo="fuu"" -l asterisk
+  321  su -c "env | grep GOO" -l asterisk
+  322  su -c "env | grep foo" -l asterisk
+  323  su -c "env" -l asterisk
+  324  su -c "export foo='fuu'" -l asterisk
+  325  su -c "env" -l asterisk
+  326  su -c "export foo='fuu'; env" -l asterisk
+  327  su -c "env" -l asterisk
+  328  sudo chown asterisk:asterisk g_api_key.json 
+  329  ls -l
+  330  su -c "env" -l asterisk
+  331  su -c "asterisk -rvvvvv" -l asterisk
+  332  exit
+  333  sl
+  334  ls
+  335  systemctl status asterisk.service
+  336  sudo systemctl start asterisk.service 
+  337  systemctl status asterisk.service
+  338  c
+  339  clear
+  340  su -c "asterisk -rvvvvv" -l asterisk
+  341  sudo wget -O /var/lib/asterisk/sounds/en/extra-en.zip https://www.asterisksounds.org/sites/asterisksounds.org/files/sounds/en/download/asterisk-sounds-extra-en-2.9.15.zip
+  342  vim /var/lib/asterisk/agi-bin/agi_test.py 
+  343  clear
+  344  sudo mkdir /var/lib/asterisk/sounds/es
+  345  cd /var/lib/asterisk/sounds/
+  346  ñs
+  347  ls
+  348  cd es/
+  349  ls
+  350  unzip core-es.zip 
+  351  sudo apt install unzip
+  352  unzip core-es.zip 
+  353  sudo unzip *.zip
+  354  ls
+  355  sudo unzip core-es.zip 
+  356  sudo unzip extra-es.zip 
+  357  ls
+  358  cd ../
+  359  cd en/
+  360  sudo unzip extra-en.zip 
+  361  cd ../
+  362  cd ..
+  363  sudo chown -R asterisk:asterisk sounds/
+  364  clear
+  365  cd /etc/asterisk/
+  366  mysql -p -u asterisk
+  367  su -c "asterisk -rvvvvv" -l asterisk
+  368  mysql -p -u asterisk
+  369  sudo apt install mongodb
+  370  mysql -p -u asterisk
+  371  nc -N 192.168.1.34 1234 < /tmp/recording.wav 
+  372  nc -N 192.168.1.49 1234 < /tmp/recording.wav 
+  373  sudo pip3 install google-cloud-speech
+  374  history | grep pip
+  375  cd
+  376  nc -l 1234 > g_api_key.json
+  377  vim .bashrc 
+  378  pwd
+  379  fg
+  380  . .bashrc 
+  381  env | grep GOOGLE
+  382  cat .bashrc 
+  383  cp .bashrc /vagrant/Working_config/
+  384  cd /etc/
+  385  cp odbc* /vagrant/Working_config/
+  386  cd asterisk/
+  387  cp sip.conf extensions.conf extconfig.conf func_odbc.conf features.conf voicemail.conf /vagrant/Working_config/
+  388  history > /vagrant/Working_config/command_history.txt
+  389  cp res_odbc.conf /vagrant/Working_config/
+  390  ls
+  391  cp /var/lib/asterisk/agi-bin/agi_test.py /vagrant/Working_config/
+  392  mv extensions.conf extensions.conf.bak
+  393  ls -la
+  394  cp modules.conf /vagrant/Working_config/
+  395  mv extensions.conf extensions.conf.old
+  396  sudo mv extensions.conf extensions.conf.old
+  397  sudo ln -s /vagrant/Working_config/extensions.conf extensions.conf
+  398  cat extensions.conf
+  399  c
+  400  clear
+  401  sudo mv sip.conf sip.conf.bak
+  402  sudo ln -s /vagrant/Working_config/sip.conf sip.conf
+  403  sudo mv modules.conf modules.conf.bak
+  404  sudo ln -s /vagrant/Working_config/modules.conf modules.conf
+  405  sudo mv func_odbc.conf func_odbc.conf.bak
+  406  sudo ln -s /vagrant/Working_config/func_odbc.conf func_odbc.conf
+  407  sudo mv features.conf features.conf.bak
+  408  sudo ln -s /vagrant/Working_config/features.conf features.conf
+  409  sudo mv voicemail.conf voicemail.conf.bak
+  410  sudo ln -s /vagrant/Working_config/voicemail.conf voicemail.conf
+  411  sudo mv res_odbc.conf res_odbc.conf.bak
+  412  sudo ln -s /vagrant/Working_config/res_odbc.conf res_odbc.conf
+  413  sudo mv extconfig.conf extconfig.conf.bak
+  414  sudo ln -s /vagrant/Working_config/extconfig.conf extconfig.conf
+  415  c
+  416  cd ..
+  417  sudo mv odbc.ini odbc.ini.bak
+  418  sudo ln -s /vagrant/Working_config/odbc.ini odbc.ini
+  419  sudo mv odbcinst.ini odbcinst.ini.bak
+  420  sudo ln -s /vagrant/Working_config/odbcinst.ini odbcinst.ini
+  421  clear
+  422  nc -N 192.168.1.49 1234 < /tmp/recording.wav 
+  423  mysqldump --user=asterisk --password=asterisk --opt asterisk > /vagrant/Working_config/asteriskdb.sql
+  424  nc -N 192.168.1.49 1234 < /tmp/recording.wav 
+  425  man sendmail
+  426  sudo apt install sendmail
+  427  man sendmail
+  428  cat /vagrant/Asterisk_scripts/
+  429  cat /vagrant/Asterisk_scripts/rfc_scraping_tests.py 
+  430  python3 /vagrant/Asterisk_scripts/rfc_scraping_tests.py 
+  431  clear
+  432  python3 /vagrant/Asterisk_scripts/rfc_scraping_tests.py 
+  433  clear
+  434  python3 /vagrant/Asterisk_scripts/rfc_scraping_tests.py 
+  435  cat /tmp/email.txt
+  436  clear
+  437  python3 /vagrant/Asterisk_scripts/rfc_scraping_tests.py 
+  438  cat /tmp/email.txt 
+  439  cat /tmp/email.txt | sendmail -i -t
+  440  sendmail -t
+  441  python3 /vagrant/Asterisk_scripts/rfc_scraping_tests.py 
+  442  sendmail -t
+  443  sendmail -t -v
+  444  cat /var/mail/vagrant 
+  445  python3 /vagrant/Asterisk_scripts/rfc_scraping_tests.py 
+  446  cd /var/lib/asterisk/agi-bin/
+  447  ls
+  448  ln -s /vagrant/Asterisk_scripts/rfc_scraping_tests.py time_to_rfc.py
+  449  sudo ln -s /vagrant/Asterisk_scripts/rfc_scraping_tests.py time_to_rfc.py
+  450  ls -l
+  451  sudo chown asterisk:asterisk time_to_rfc.py 
+  452  sudo chmod +x time_to_rfc.py 
+  453  ls -l
+  454  man chown
+  455  sudo chown -h asterisk:asterisk time_to_rfc.py 
+  456  ls -l
+  457  vim agi_test.py 
+  458  . ~/.bashrc 
+  459  head agi_test.py 
+  460  ls /tmp/
+  461  python3 /var/lib/asterisk/agi-bin/time_to_rfc.py /tmp/recording.wav 
+  462  cat /tmp/email.txt 
+  463  sudo cp agi_test.py /vagrant/Asterisk_scripts/
+  464  sudo ln -s /vagrant/Asterisk_scripts/agi_test.py agi_test.py
+  465  mv agi_test.py agi_test.py.bak
+  466  sudo mv agi_test.py agi_test.py.bak
+  467  sudo ln -s /vagrant/Asterisk_scripts/agi_test.py agi_test.py
+  468  ls -l
+  469  sudo chown -h asterisk:asterisk agi_test.py
+  470  ls -l
+  471  env | grep GOOGLE
+  472  cat /tmp/email.txt 
+  473  ls -l /tmp/
+  474  ls /etc/systemd/system
+  475  ls -l /etc/systemd/system
+  476  sudo cp /etc/systemd/system/asterisk.service /vagrant/Asterisk_setup/
+  477  cd ../moh/
+  478  ls
+  479  cat ../agi-bin/agi_test.py
+  480  exit
+  481  sudo systemctl start asterisk.service 
+  482  systemctl status asterisk
+  483  cat /etc/systemd/system/asterisk.service 
+  484  c
+  485  clear
+  486  sudo mkdir /etc/asterisk/keys
+  487  cd /etc/asterisk/
+  488  cd /usr/share/asterisk-17.2.0/contrib/
+  489  ls
+  490  cd scripts/
+  491  ls
+  492  cd
+  493  ip a
+  494  sudo pip3 install pymongo
+  495  mongo
+  496  exit
+  497  systemctl status mongodb.service
+  498  clear
+  499  cd /var/lib/asterisk/agi-bin/
+  500  ls
+  501  ls -l
+  502  sudo ln -s /vagrant/Asterisk_scripts/update_mongo_db.py 
+  503  ls -l
+  504  cd
+  505  ln -s /vagrant/Asterisk_scripts/get_charging_data.py get_charging_data.py
+  506  chmod +x get_charging_data.py 
+  507  chmod -x get_charging_data.py 
+  508  python3 get_charging_data.py 
+  509  clear
+  510  python3 get_charging_data.py 
+  511  exit
+  512  cd /usr/share/asterisk-17.2.0/contrib/scripts/
+  513  sudo ./ast_tls_cert -C 192.168.1.16 -O "Foo Corp" -d /etc/asterisk/keys
+  514  sudo ./ast_tls_cert -m client -c /et/asterisk/keys/ca.crt -k /etc/asterisk/keys/ca.key -C 192.168.1.7 -O "Foo Corp" -d /etc/asterisk/keys -m foo_key
+  515  sudo ./ast_tls_cert -m client -c /et/asterisk/keys/ca.crt -k /etc/asterisk/keys/ca.key -C 192.168.1.7 -O "Foo Corp" -d /etc/asterisk/keys -o foo_key
+  516  sudo ./ast_tls_cert -m client -c /etc/asterisk/keys/ca.crt -k /etc/asterisk/keys/ca.key -C 192.168.1.7 -O "Foo Corp" -d /etc/asterisk/keys -o foo_key
+  517  nc -N 192.168.1.49 1234 < /etc/asterisk/keys/ca.crt 
+  518  sudo nc -N 192.168.1.49 1234 < /etc/asterisk/keys/ca.crt 
+  519  cd /etc/asterisk/keys
+  520  ls -l
+  521  sudo cp ca.crt ca.crt.light
+  522  sudo chmod ca.crt.light 0644
+  523  sudo chmod 0644 ca.crt.light
+  524  sudo nc -N 192.168.1.49 1234 < /etc/asterisk/keys/ca.crt.light 
+  525  sudo cp foo_key.pem foo_key.pem.light
+  526  sudo chmod 0644 foo_key.pem.light 
+  527  sudo nc -N 192.168.1.49 1234 < /etc/asterisk/keys/foo_key.pem.light 
+  528  cd ..
+  529  sudo chown -R asterisk:asterisk keys/
+  530  cd keys/
+  531  ls -l
+  532  rm *.light
+  533  sudo rm *.light
+  534  ls -l
+  535  su -c "asterisk -rvvvvv" -l asterisk
+  536  exit
+  537  mysql -u root -p
+  538  mysql -u root
+  539  mysql -u root -p
+  540  sudo mysql -u root -p
+  541  mysql -u asterisk -p
+  542  sudo mysql -u root -p
+  543  mysql -u asterisk -p
+  544  sudo mysql -u root -p
+  545  apt search onixodbc
+  546  apt show onixodbc
+  547  sudo apt update
+  548  apt show unixodbc
+  549  apt show libltdl
+  550  apt show libltdl7
+  551  ls
+  552  lsb_release -a
+  553  myodbc-installer -d -l
+  554  odbcinst -q -d
+  555  sudo isql -v asterisk-connector asterisk asterisk
+  556  sudo isql -v asterisk-mysql-cnx asterisk asterisk
+  557  cat /etc/odbc.ini
+  558  history > /vagrant/Working_config/command_history.txt 
