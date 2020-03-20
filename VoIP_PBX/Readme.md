@@ -574,14 +574,14 @@ La lógica detrás del plan de marcación es análoga a la que habíamos visto c
 ## Interconectando dos PBX con el protocolo IAX
 ### TODO: Esperemos a llevarlo a la práctica para ver cómo sale todo...
 
-## Integración con la [**AGI**](https://wiki.asterisk.org/wiki/pages/viewpage.action?pageId=32375589): **A**sterisk **G**ateway **I**nterface
+## Integración con la [AGI](https://wiki.asterisk.org/wiki/pages/viewpage.action?pageId=32375589): Asterisk Gateway Interface
 La **AGI** no es más que una interfaz que permite a aplicaciones externas manipular el canal de una llamada a través de librerías. Nosotros hemos elegido emplear `Python` y la librería `Pyst2` para llevar a cabo estas funciones. Para poder trabajar con `Pyst2` debemos instalarlo. Con tan solo ejecutar el siguiente comando tendremos todo listo:
 
 ```bash
 sudo pip3 install pyst2
 ```
 
-Un pequeño programa que muestra un manejo básico de esta interfaz es:
+Un pequeño programa que muestra un manejo básico de esta interfaz sería `agi_test.py`:
 
 ```python
 #!/usr/bin/python3                                          # Le indicamos a la shell que este archivo es para el
@@ -629,7 +629,7 @@ use asterisk_data                                                           // C
 db.call_data.insertOne({caller: "foo", called: "fuu", chargeable: true})    // Crea la colección call_data e inserta un documento
 ```
 
-A través de la librería `pymongo` podemos automatizar todo desde `python`. Instalamos `pymongo` con `sudo pip3 install pymongo` y podemos entonces escribir scripts que aprovechen la **AGI** como:
+A través de la librería `pymongo` podemos automatizar todo desde `python`. Instalamos `pymongo` con `sudo pip3 install pymongo` y podemos entonces escribir scripts que aprovechen la **AGI** como `update_mongo.py`:
 
 ```python
 #!/usr/bin/python3
@@ -671,3 +671,269 @@ Este script se llama en la subrutina `store-data` del plan de marcación y se le
 ```ini
 same => n,AGI(update_mongo_db.py,${GLOBAL(${ARG1})})
 ```
+
+Con el objetivo de implementar un sistema de tarificación hemos preparado el script `get_charging_data.py` que consulta esta base de datos y devuelve el precio a cobrar a cada usuario:
+
+```python
+##################################################################################################
+#                                       MongoDB Structure                                        #
+# MongoDB manages databases composed of collections. These collections in turn                   #
+# contain documents which are internally represented as BSON (similar to JSON) objects.          #
+# Connecting to MongoDB's daemon is done by running 'mongo'. We have created our own             #
+# database running 'use asterisk_data' and then by running the following command we inserted     #
+# our first document: db.call_data.insertOne({caller: "foo", called: "fuu", chargeable: true})   #
+# the collection call_data is automagically created for us. Note MongoDB is quite lazy when      #
+# creating entries so collections and DBs themselves won't show up until we insert a document.   #
+# We can then query a collection with db.call_data.find({}) to get every record or we could      #
+# issue db.call_data.find({"caller": "pablo"}) to get those documents whose "caller" was "pablo" #
+# API calls are mostly the same so we can get on with this info!                                 #
+##################################################################################################
+
+import pymongo
+
+def main():
+    charging_data = {}                              # Vamos almacenando los datos de cobro en este diccionario
+    price_per_call = 0.15                           # Fijamos el precio por llamada
+
+    mongo_client = pymongo.MongoClient('localhost', 27017)
+    call_data = mongo_client.asterisk_data.call_data
+
+    for call in call_data.find():                   # Llamando a find() sin parámetros se devuelve una lista de diccionarios con los datos
+        if call['chargeable']:
+            if call['caller'] not in charging_data:
+                charging_data[call['caller']] = 0
+            charging_data[call['caller']] += 1
+
+    for caller, n_calls in charging_data.items():   # Con los datos recogidos nos limitamos a imprimirlos
+        print("{} made {} chargeable call(s) and will be charged {} euros".format(caller.capitalize(), n_calls, n_calls * price_per_call))
+
+    return
+
+if __name__ == '__main__':
+    main()
+```
+
+Con todas las bases de datos explicadas ha llegado el momento de abordar la aplicación principal de nuestro plan de marcación que nos permite consultar el título de un **RFC** llamando a una extensión.
+
+## En busca de los RFCs
+Antes de comentar el funcionamiento de la extensión debemos abordar el servicio de conversión de texto a voz que nos ofrece `Festival`. Este programa desarrollado por la universidad de Edinburgo (una ciudad preciosa) puede correr como un servidor pero también nos ofrece un ejecutable que convierte una cadena de entrada en un archivo de audio. `Astersk` ofrece la aplicación [`Festival()`](https://wiki.asterisk.org/wiki/display/AST/Asterisk+17+Application_Festival) en el plan de marcación para conectarse a un servidor activo pero hemos preferido emplear el ejecutable ya que nos resultaba más cómodo. Para invocarlo desde el plan de marcación utilizaremos [`System()`](https://wiki.asterisk.org/wiki/display/AST/Asterisk+17+Application_System). Instalar `festival` es tan sencillo como ejecutar `sudo apt install festival`.
+
+Teniendo ésto en mente la extensión en cuestión es:
+
+```ini
+exten => 702,1,Verbose(2, Get the RFC)
+    same => n,Answer()                                                                                                      # Descuelga la línea
+    same => n,System(echo "Please say the desired RFC number" | /usr/bin/text2wave -scale 1.5 -F 8000 -o /tmp/prompt.wav)   # Traduce el texto con asterisk
+    same => n,Playback(/tmp/prompt)                                                                                         # Reproduce el resultado
+    same => n,System(rm -f /tmp/prompt.wav)                                                                                 # Elimínalo
+    same => n,Record(/tmp/recording.wav)                                                                                    # Empieza a grabar la entrada del ususario
+    same => n,AGI(time_to_rfc.py,/tmp/recording.wav)                                                                        # Llama al script principal
+    same => n,Playback(/tmp/title)                                                                                          # Reproduce el archivo generado por el script
+    same => n,Wait(1)                                                                                                       # Evitamos que la grabación se corte
+    same => n,System(rm -f /tmp/recording.wav)                                                                              # Elimina la grabación
+    same => n,System(rm -f /tmp/title.wav)                                                                                  # Elimina el el audio con el título
+    same => n,Hangup()                                                                                                      # Cuelga la llamada
+```
+
+Aquí `text2wave` es el encargado de generar el texto hablado a una frecuencia de `8 kHz` con un factor de volumen de `1.5`, es decir, amplificado respecto al valor nominal. El script que lleva el peso de la extensión es:
+
+```python
+#!/usr/bin/python3
+
+import urllib.request                       # Nos permite descargar el RFC pedido
+from google.cloud import speech_v1p1beta1   # Voice --> Text API
+import os                                   # Para hacer llamadas a la shell
+import asterisk.agi as agi                  # Paso de parámetros por la AGI
+
+agi_inst = agi.AGI()
+
+def recognize_voice(voice_file):
+    agi_inst.verbose(voice_file)
+
+    # Diccionario que mapea cifras con su nombre alfabético
+    w_2_d = {
+        'zero': '0',
+        'one': '1',
+        'two': '2',
+        'three': '3',
+        'four': '4',
+        'five': '5',
+        'six': '6',
+        'seven': '7',
+        'eight': '8',
+        'nine': '9'
+    }
+
+    client = speech_v1p1beta1.SpeechClient() # Instanciamos un cliente de la API de Google
+
+    # La muestra está en inglés con una frecuencia de muestreo de 8000 Hz
+    config = {
+        "language_code": "en-US",
+        "sample_rate_hertz": 8000,
+    }
+
+    # Incluimos el audio desde el archvivo que habíamos grabado antes y que pasamos como argumento desde el plan de marcación
+    audio = {"content": open(voice_file, 'rb').read()}
+
+    # Recibimos la respuesta
+    response = client.recognize(config, audio)
+
+    # Extraemos el texto del objeto anterior
+    trans_text = response.results[0].alternatives[0].transcript
+
+    # Construimos la respuesta en función de si se ha dicho el número completo o los dígitos por separado
+    num = ""
+    if ' ' in trans_text:
+        for dig in trans_text.split(' '):
+            num += w_2_d[dig]
+    else:
+        num = trans_text
+
+    agi_inst.verbose("Translated speech: {}".format(num))
+
+    return num
+
+    # RFCs probados
+        # SMI -> 1155
+        # UDP -> 768
+        # TCP -> 793
+        # IP -> 791
+        # HTTP -> 2616
+
+    # Dada la variabilidad del formato de los RFCs solo aseguramos obtener el título correcto de los anteriores documentos
+
+def scrap_rfc(rfc_id):
+    # Descargamos el RFC pedido
+    rfc = urllib.request.urlopen('https://tools.ietf.org/rfc/rfc{}.txt'.format(rfc_id))
+
+    agi_inst.verbose("Downloaded RFC {}".format(rfc_id))
+
+    # Nos preparamos para parsearlo y encontrar el título
+    began_doc = False
+    reading_title = False
+    whiteline = 0
+    title = ""
+
+    # Plantilla que rellenaremos con los datos encontrados. Se adecúa a los requisitos de SMTP, de ahí el punto (.) final con 2 nuevas líneas (\n)
+    email = 'From: "Foo" <foo@home.net>\nTo: "You" <pcolladosoto@gmail.com>\nSubject: RCF {} Title\nMIME-Version: 1.0\nContent-Type: text/plain\n\n{}\n.\n'
+
+    # Leemos el RFC descargado en busca del título
+    for line in rfc:
+        if line.decode().strip() == '' or line.decode().isspace() or not line.decode().strip(' \n').isprintable() or '-----------' in line.decode():
+            whiteline += 1
+        else:
+            if not began_doc:
+                began_doc = True
+                whiteline = 0
+            elif whiteline <= 1 and not reading_title:
+                whiteline = 0
+            elif whiteline >= 2 and not reading_title and began_doc:
+                reading_title = True
+                title += line.decode()
+                whiteline = 0
+            elif reading_title and 'Table of Contents' not in line.decode() and 'Memo' not in line.decode():
+                title += line.decode()
+
+        if reading_title and (whiteline > 1 or 'Table of Contents' in line.decode() or 'Memo' in line.decode()):
+            break
+
+    agi_inst.verbose("Got title: {}".format(title.strip()))
+
+    agi_inst.verbose("Sending mail!")
+
+    # Llamamos a sendmail para que envía el correo relleno
+    os.system("echo '{}' | sendmail -t".format(email.format(rfc_id, title.strip())))
+
+    agi_inst.verbose("Creating title audio file!")
+
+    # Generamos un archivo de audio con el título del RFC traducido
+    os.system("echo '{}' | /usr/bin/text2wave -scale 1.5 -F 8000 -o /tmp/title.wav".format(title.strip()))
+
+def main():
+    agi_inst.verbose("Script started!")
+    # Lanzamos el script entero
+    scrap_rfc(recognize_voice(agi_inst.env['agi_arg_1']))
+    return 0
+
+if __name__=='__main__':
+    main()
+```
+
+El script hace uso de la **API** de conversión de voz a texto de **GOOGLE**. Para que todo funcione correctamente debemos exportar una variable de entorno que contenga las claves que se nos proporcionan durante el registro en la página web. Dado que nosotros ejecutamos `asterisk` como un servicio debemos incluir esta variable en el archivo `.service` asociado tal y como comentamos en el anexo. El resto del script aparece comentado en entre líneas.
+
+Por ahora nuestras llamadas van en "claro", cualquiera puede escuchar nuestras conversaciones. Veamos como establecer llamadas seguras a través del protocolo de transporte **TLS** acompañado de la versión segura del protocolo de tiempo real, **SRTP** (**S**ecure **R**eal-**T**ime **P**rotocol).
+
+## Asegurando las comunicaciones
+Para configurar esta funcionalidad emplearemos el softphone *Blink* dado que es el que se emplea en nuestra [referencia](https://wiki.asterisk.org/wiki/display/AST/Secure+Calling+Tutorial) y se ha comportado bien con los certificados.
+
+Con **TLS** conseguimos asegurar la señalización que se cursa para establecer y liberar la llamada mientras que **SRTP** permite proteger el audio de la llamada en cuestión. El soprte de estos protocolos debe estar configurado a la hora de compilar `asterisk`. Por defecto estos módulos están incluidos. Para poder emplear estos mecanismos debemos generar una serie de certificados tanto para la PBX como para los clientes que quieran conectarse de forma segura. Para ello usaremos el script `ast_tls_cert` que nos suministra `asterisk` en `/usr/share/asterisk-17.2.0/contrib/scripts/`, el directorio donde habíamos descargado las fuentes. Para generar los certificados de `asterisk` y los del cliente debemos ejecutar:
+
+```bash
+# Generamos el certificdo de la PBX y la establecemos como una autoridad certificadora
+sudo ./ast_tls_cert -C 192.168.1.16 -O "Foo Corp" -d /etc/asterisk/keys
+
+# Generamos el certificado para un cliente
+sudo ./ast_tls_cert -m client -c /etc/asterisk/keys/ca.crt -k /etc/asterisk/keys/ca.key -C 192.168.1.7 -O "Foo Corp" -d /etc/asterisk/keys -o foo
+```
+
+Las opciones empleadas son:
+
+- `-C`: *IP* de la PBX o del cliente
+- `-O`: Nombre de la organización
+- `-d`: Directorio de salida para los archivos generados
+- `-m client`: Queremos un certificado para un cliente. De lo contrario se asume que es para un servidor
+- `-k`: Clave de la entidad certificadora que habíamos generado antes
+- `-o`: Nombre de la claver que estamos generando.
+
+Para que todo funcione correctamente debemos ajustar la configuración de `sip.conf`:
+
+```ini
+tlsenable=yes                               ; Habilitamos el transporte con TLS
+tlsbindaddr=0.0.0.0                         ; Escuchamos conexiones TLS entrantes en todas las interfaces de red
+tlscertfile=/etc/asterisk/keys/asterisk.pem ; Certificado de asterisk para las conxiones que generamos antes
+tlscafile=/etc/asterisk/keys/ca.crt         ; Certificado de la agencia certificadora (nostros en este caso). Nos permite comprobar la validez del anterior
+tlscipher=all                               ; Habilita todos los tipos de cifrado
+tlsclientmethod=all                         ; Protocolos habilitados
+
+```
+
+Además debemos forzar a que los clientes utilizen **TLS** en la capa de transporte. Habilitar **SRTP** solo supone incluir una opción en la configuración de los usuarios:
+
+```ini
+[pablo](friends_internal)
+secret=pablo
+language=es
+transport=tls   ; Forzamos a que el transporte sea TLS
+encryption=yes  ; Forzamos el encriptado del audio en las llamadas
+```
+
+Ahora solo queda configurar el cliente para que emplee estos protocolos seguros. Debemos copiar el certificado de la agencia de certificación (`ca.crt`) y la clave del ususario (`foo.key`) al terminal de este abonado para que los introduzca en los pasos oportunos.
+
+## Habilitando videollamadas
+Lo primero que debemos hacer es habilitar las videollamadas en `sip.conf` mediante la opción:
+
+```ini
+videosupport=yes
+```
+
+Después tenemos que configurar los códecs de vídeo que pueden utilizar los distintos usuarios. Como el uso de codécs distintos suele suscitar probelmas hemos optado por habilitar solo uno (`H.264`) tal y como se ve en la plantilla que instanciamos para cada usuario:
+
+```ini
+[friends_internal](!)
+type=friend
+host=dynamic
+context=from-internal
+disallow=all
+; Audio codec
+allow=ulaw
+; Video Codec
+allow=h264
+```
+
+Si configuramos los clientes para que empleen este códec de vídeo veremos cómo ya funcionan las videollamadas de uno a otro sin problema.
+
+## Conclusión
+A lo largo de este documento hemos visto cómo habilitar los distintos servicios requeridos se resumía en editar los archivos de configuración implicados. Si bien una vez que se sabe que hacer puede parecer algo sencillo la dificultad radica en saber qué es lo que se debe modificar. Es por ello que esperamos haber sido capaces de eliminar la complejidad de este proceso mientras recorríamos cada uno de los pasos necesarios para llegar a una centralita plenamente operativa. Si tienes cualquier pregunta puedes encontrar un correo de contacto en mi perfil de [GitHub](https://github.com/pcolladosoto). Si encuentras una errata o algo mejorable me encantaría que o bien lo notificaras o bien hicieras un *pull request* con el fallo corregido. ¡Gracias por tu tiempo!
+
+# Anexo
+## Preparando el entorno para asterisk
