@@ -9,11 +9,23 @@ Tras lograr instalar el programa llega el momento de configurarlo. La mayor part
 
 En aras de preparar un documento lo más completo posible comentaremos en un anexo los aspectos básicos del manejo de `asterisk` desde su propia interfaz por línea de comandos (`CLI`) y explicaremos cómo hemos preparado nuestro sistema para facilitar todo el desarrollo en la medida de lo posible. Comentaremos también los *softphones* que hemos utilizado para probar todo con el objetivo de facilitar la reproducibilidad de nuestro sistema.
 
-Todos los archivos de configuración y scripts empleados durante la preparación de la PBX se pueden encontrar en un repositorio de [`GitHub`](https://github.com/) :octocat: público que nos ha facilitado la gestión de tantos archivos. Las rutas de los archivos que comentemos a lo largo del documento hacen referencia a ese mismo repositorio aunque también incluiremos enlaces directos a los archivos en cuestión ya que dada la longitud de según y qué archivos creemos que pueden dificultar el manejo de este informe.
+Todos los archivos de configuración y scripts empleados durante la preparación de la PBX se pueden encontrar en un repositorio de [`GitHub`](https://github.com/UAH-s-Telematics-Engineering-Tasks/net_services_system_lab/tree/master/VoIP_PBX) :octocat: público que nos ha facilitado la gestión de tantos archivos. Las rutas de los archivos que comentemos a lo largo del documento hacen referencia a ese mismo repositorio aunque también incluiremos enlaces directos a los archivos en cuestión ya que dada la longitud de según y qué archivos creemos que pueden dificultar el manejo de este informe.
 
 ## Instalando Asterisk
 ### Fuentes y dependencias
-Al pretender instalar `asterisk` a partir de su código fuente primero debemos obtenerlo. Dado que nuestro escenario solo cuenta con un entorno basado en texto (en el anexo se comenta que nuestras máquinas se han levantado con `vagrant`) emplearemos siempre programas que se pueden invoccar desde una terminal sin depender de un entorno gráfico. La forma de distribuir estas fuentes suele ser a través de un archivo comprimido `tar.gz`. Por lo tanto debemos descargarlo y descomprimirlo. Este proceso se resume en las siguientes líneas que se encuentran en el script de automatización de instalación [`Asterisk_setup/Get_src_n_dependencies.sh`](https://github.com). Para lanzarlo basta con ejecutar `bash Get_src_n_dependencies.sh` desde la máquina en la que instalaremos el programa. Preferimos llamar explícitamente a la shell (con el comando `bash`) en vez de ejecutar el script con `./Get_src_n_dependencies.sh ` para evitar tenere que lidiar con los permisos de ejecución. Así nos evitamos un comando más (somos así de perezosos).
+Al pretender instalar `asterisk` a partir de su código fuente primero debemos obtenerlo. Dado que nuestro escenario solo cuenta con un entorno basado en texto (en el anexo se comenta que nuestras máquinas se han levantado con `vagrant`) emplearemos siempre programas que se pueden invocar desde una terminal sin depender de un entorno gráfico. La forma de distribuir estas fuentes suele ser a través de un archivo comprimido `tar.gz`. Por lo tanto debemos descargarlo y descomprimirlo. Este proceso se resume en las siguientes líneas que se encuentran en el script de automatización de instalación [`Asterisk_setup/Get_src_n_dependencies.sh`](https://github.com/UAH-s-Telematics-Engineering-Tasks/net_services_system_lab/blob/master/VoIP_PBX/Asterisk_setup/Get_src_n_dependencies.sh). Para lanzarlo basta con ejecutar `bash Get_src_n_dependencies.sh` desde la máquina en la que instalaremos el programa. Preferimos llamar explícitamente a la shell (con el comando `bash`) en vez de ejecutar el script con `./Get_src_n_dependencies.sh ` para evitar tenere que lidiar con los permisos de ejecución. Así nos evitamos un comando más (somos así de perezosos).
+
+```bash
+
+# Get asterisk's source code
+sudo wget -O /usr/share/asterisk-17.2.tar.gz https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-17.2.0.tar.gz
+
+# Uncompress the sources and remove them right away!
+sudo tar -xvf /usr/share/asterisk-17.2.tar.gz
+sudo rm /usr/share/asterisk-17.2.tar.gz
+```
+
+Se observa por tanto que estamos trabajando con la versión `17.2.0` de `asterisk` tal y como aparece en el enlace que le pasamos a `wget`. Si se visita dicho [sitio](https://downloads.asterisk.org/pub/telephony/asterisk) encontraremos varias versiones de `asterisk` pudiendo elegir cualquiera que deseemos. Hemos escogido la `17.2.0` porque era la última en el momento de la instalación.
 
 
 A medida que ha ido avanzando la cantidad de software desarrollado nos hemos visto obligados a escribir y utilizar librerías que nos faciliten el trabajo de manera que no tengamos que "reinventar la rueda" continuamente. Con `asterisk` no iba a ser de otra manera con lo que además de su código fuente debemos instalar las librerías de las que depende. En sistemas basados en `linux` se suele manejar el software instalado en unidades llamadas paquetes donde unos paquetes dependen de otros en la mayoría de los casos. Las librerías son el fondo paquetes normales y corrientes pero podemos instalarlas ya compiladas u obtener sus paquetes de desarrollo. Si instalamos las librerías compiladas a nivel de "usuario" permitimos que programas ya compilados puedan utilizar sus servicios pero este **NO** es nuestro caso... Nosotros necesitamos compilar las fuentes con las librerías (es decir, necesitamos "reolver los distintos `#include <...>` que aparecen en las fuentes de `asterisk`) por lo que necesitamos las fuentes de las librerías a su vez. En un sistema `Ubuntu` como el que estamos empleando estos paquetes suelen ir acompañados del sufijo `-dev`.
@@ -571,8 +583,37 @@ exten => wrong_queue,1,Playback(tt-weasels)                 ; Si la cola no exis
 
 La lógica detrás del plan de marcación es análoga a la que habíamos visto con las llamadas con lo que no queremos extendernos más para no aportar nada nuevo. También podríamos automatizar el proceso de asignación de agentes a colas tal y como aparece en la página de la [wiki](https://wiki.asterisk.org/wiki/display/AST/Building+Queues) de `asterisk` que hemos usado como fuente pero hemos creido que merecía más la pena implementar otras funcionalidades dado lo simple de nuestro escenario.
 
-## Interconectando dos PBX con el protocolo IAX
-### TODO: Esperemos a llevarlo a la práctica para ver cómo sale todo...
+## Interconectando dos PBX con el protocolo IAX2
+
+### Kyoto's `iax.conf`
+
+```ini
+[general]
+autokill=yes
+
+register => kyoto:japan@192.168.1.26
+
+[tokyo]
+type=friend
+host=dynamic
+trunk=yes
+secret=japan
+context=from-internal
+deny=0.0.0.0/0.0.0.0
+permit=192.168.1.26/255.255.255.0
+```
+
+### Kyoto's `extensions.conf`
+```ini
+; User calls!
+exten => _3XX,1,Set(peer_name=${GLOBAL(${EXTEN})})
+        same => n,Dial(SIP/${peer_name},20)
+
+; Forward Calls to another PBX
+exten => _2XX,1,NoOp()
+        same => n,Dial(IAX2/tokyo/${EXTEN})
+        same => n,Hangup()
+```
 
 ## Integración con la [AGI](https://wiki.asterisk.org/wiki/pages/viewpage.action?pageId=32375589): Asterisk Gateway Interface
 La **AGI** no es más que una interfaz que permite a aplicaciones externas manipular el canal de una llamada a través de librerías. Nosotros hemos elegido emplear `Python` y la librería `Pyst2` para llevar a cabo estas funciones. Para poder trabajar con `Pyst2` debemos instalarlo. Con tan solo ejecutar el siguiente comando tendremos todo listo:
@@ -876,6 +917,8 @@ sudo ./ast_tls_cert -C 192.168.1.16 -O "Foo Corp" -d /etc/asterisk/keys
 sudo ./ast_tls_cert -m client -c /etc/asterisk/keys/ca.crt -k /etc/asterisk/keys/ca.key -C 192.168.1.7 -O "Foo Corp" -d /etc/asterisk/keys -o foo
 ```
 
+Debemos señalar que al tener que meter la `IP` de los clientes que se deben autenticar tenemos que regenerar los certificados si desplegamos nuestro sistema en una red diferente. En nuestro caso habrá que regenerarlo todo cuando demostremos el funcionamiento de la práctica en el laboratorio. Como medida de contingencia podríamos emplear el archivo `/etc/hosts` para generar estos certificados siempre con el mismo *hostname* asociado a un cliente aunque tendremos que cambiar nosotros `/etc/hosts` a mano y no tendremos otra que regenerar el certificado... En un escenario real emplearíamos nombres de dominio para evitar tener que llevar a cabo esta reconfiguración de manera continua.
+
 Las opciones empleadas son:
 
 - `-C`: *IP* de la PBX o del cliente
@@ -932,8 +975,29 @@ allow=h264
 
 Si configuramos los clientes para que empleen este códec de vídeo veremos cómo ya funcionan las videollamadas de uno a otro sin problema.
 
+## Problemas encontrados
+Una vez que toda la configuración está escrita y documentada puede parecer sencilla pero el proceso para llegar hasta ella ha estado salpicado de problemas, errores y mucha frustración. Quizá el primer problema es encontrarse de frente con un lenguaje de configuración tan poco intuitivo y desagradable de manejar como es `INI`. Una vez nos hicimos a su sintaxis tuvimos que pararnos a analizar cual era la arquitectura general de `asterisk` para poder acometer la configuración. La compartimentación de la misma en varios archivos facilita mucho su manejor pero dificulta encontrar las relaciones que existen entre unos y otros en un primer momento.
+
+Con lo anterior resuelto el resto de la configuración inicial era cuestión de encontrar la información pertinente en la `wiki` y aplicarlo todo de manera correcta. La siguiente dificultad fue comunicar a `asterisk` con las bases de datos externas. Si bien es verdad que no fue *tan* horrible como nos temíamos según los comentarios de otros compañeros sí que tuvimos que estar un rato hasta que todo se puso a funcionar. Una vez conectado todo tardamos un tiempo en encontrar las funciones de `func_odbc.conf` pero una vez las empezamos a utilizar el proceso de uso de las bases de datos fue relativamente rodado.
+
+Con todo lo anterior listo solo tuvimos que ser capaces de ejecutar el primer script empleando la `AGI` para empezar a sacar muchas cosas adelante. Una vez conseguimos llamar a un programa externo se abre un gan abanico de posibilidades que podemos aprovechar a través de programas en `python`. Esto nos dota de una flexibilidad que perite aumentar muchísimos el ritmo de trabajo.
+
+Con todo señalamos que el proceso no ha sido sencillo pero con paciencia y teniendo las cosas claras todo iba poco a poco encajando en su sitio hasta que llegamos a un sistema funcional. Lo que tenemos claro es que de ahora en adelante valoraremos mucho más las PBX que veamos en funcionamiento.
+
 ## Conclusión
 A lo largo de este documento hemos visto cómo habilitar los distintos servicios requeridos se resumía en editar los archivos de configuración implicados. Si bien una vez que se sabe que hacer puede parecer algo sencillo la dificultad radica en saber qué es lo que se debe modificar. Es por ello que esperamos haber sido capaces de eliminar la complejidad de este proceso mientras recorríamos cada uno de los pasos necesarios para llegar a una centralita plenamente operativa. Si tienes cualquier pregunta puedes encontrar un correo de contacto en mi perfil de [GitHub](https://github.com/pcolladosoto). Si encuentras una errata o algo mejorable me encantaría que o bien lo notificaras o bien hicieras un *pull request* con el fallo corregido. ¡Gracias por tu tiempo!
+
+## Bibliografía
+A pesar de haber buscado y consultado información de varias fuentes hemos visto que los únicos sitios con información sólida han demostrado ser la [wiki oficial de `asterisk`](https://wiki.asterisk.org/wiki/display/AST/Home) y el libro [*Asterisk: The Definitive Guide*](http://www.asteriskdocs.org) que puede ser consultado de manera gratuita. Muchos de los blogs encontrados así como varios artículos contenían información a veces contradictoria, otras incimplete y en muchas ocasiones indocumentada. Se han incluido enlaces puntuales a páginas pertenecientes a estos `2` sitios a lo largo del texto anterior.
+
+Para manejar herramientas de terceros como pueden ser las bases de datos `MySQL` y `MongoDB` hemos recurrido a la documentación oficial que se puede encontrar [aquí](https://dev.mysql.com/doc/refman/8.0/en/) y [aquí](https://docs.mongodb.com/) respectivamente.
+
+Las librerías que hemos empleado junto con `Python` se encuentran documentadas en sus páginas oficiales. Señalamos que el ejemplo del que hemos partido para trabajar con `Pyst2` se encontraba en *Asterisk: The Definitive Guide*. Para visitar los manuales de estas librerías pincha en sus nombres:
+
+- [`PyMongo`](https://api.mongodb.com/python/current/tutorial.html)
+- [`Pyst2`](https://pyst2.readthedocs.io/en/latest/)
+- [`GoogleAPI`](https://cloud.google.com/speech-to-text/docs/libraries#client-libraries-install-python)
+- [`urllib](https://docs.python.org/3.8/library/urllib.request.html#module-urllib.request)
 
 # Anexo
 ## Preparando el entorno para asterisk
