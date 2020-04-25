@@ -583,8 +583,37 @@ exten => wrong_queue,1,Playback(tt-weasels)                 ; Si la cola no exis
 
 La lógica detrás del plan de marcación es análoga a la que habíamos visto con las llamadas con lo que no queremos extendernos más para no aportar nada nuevo. También podríamos automatizar el proceso de asignación de agentes a colas tal y como aparece en la página de la [wiki](https://wiki.asterisk.org/wiki/display/AST/Building+Queues) de `asterisk` que hemos usado como fuente pero hemos creido que merecía más la pena implementar otras funcionalidades dado lo simple de nuestro escenario.
 
-## Interconectando dos PBX con el protocolo IAX
-### TODO: Esperemos a llevarlo a la práctica para ver cómo sale todo...
+## Interconectando dos PBX con el protocolo IAX2
+
+### Kyoto's `iax.conf`
+
+```ini
+[general]
+autokill=yes
+
+register => kyoto:japan@192.168.1.26
+
+[tokyo]
+type=friend
+host=dynamic
+trunk=yes
+secret=japan
+context=from-internal
+deny=0.0.0.0/0.0.0.0
+permit=192.168.1.26/255.255.255.0
+```
+
+### Kyoto's `extensions.conf`
+```ini
+; User calls!
+exten => _3XX,1,Set(peer_name=${GLOBAL(${EXTEN})})
+        same => n,Dial(SIP/${peer_name},20)
+
+; Forward Calls to another PBX
+exten => _2XX,1,NoOp()
+        same => n,Dial(IAX2/tokyo/${EXTEN})
+        same => n,Hangup()
+```
 
 ## Integración con la [AGI](https://wiki.asterisk.org/wiki/pages/viewpage.action?pageId=32375589): Asterisk Gateway Interface
 La **AGI** no es más que una interfaz que permite a aplicaciones externas manipular el canal de una llamada a través de librerías. Nosotros hemos elegido emplear `Python` y la librería `Pyst2` para llevar a cabo estas funciones. Para poder trabajar con `Pyst2` debemos instalarlo. Con tan solo ejecutar el siguiente comando tendremos todo listo:
