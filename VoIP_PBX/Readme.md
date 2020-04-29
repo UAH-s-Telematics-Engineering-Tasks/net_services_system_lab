@@ -153,7 +153,7 @@ Por ahora nos centraremos en la forma de hacer una llamada normal a través de l
 exten => _2XX,1,Set(peer_name=${GLOBAL(${EXTEN})})                  ; Asigna un valor determinado a la variable 'peer_name'
     same => n,GotoIf($["${peer_name}" = ""]?wrong_peer,1)           ; Si la extensión llamada no corresponde a nadie salta a la extensión 'wrong-peer'
     same => n,gosub(store-data,s,1,(${EXTEN}))                      ; Antes de llamar llama a la subrutina 'store-data'
-    same => n,Dial(SIP/${peer_name},10,tm(native-random))    ; Llama al usuario requerido
+    same => n,Dial(SIP/${peer_name},10,tm(native-random))           ; Llama al usuario requerido
     same => n,VoiceMail(${EXTEN})                                   ; Si no coge la llamada dejamos un mensaje de voz
 
 exten => wrong_peer,1,Verbose(2,Called a wrong peer...)             ; Escribe en la CLI un mensaje
@@ -584,9 +584,65 @@ exten => wrong_queue,1,Playback(tt-weasels)                 ; Si la cola no exis
 La lógica detrás del plan de marcación es análoga a la que habíamos visto con las llamadas con lo que no queremos extendernos más para no aportar nada nuevo. También podríamos automatizar el proceso de asignación de agentes a colas tal y como aparece en la página de la [wiki](https://wiki.asterisk.org/wiki/display/AST/Building+Queues) de `asterisk` que hemos usado como fuente pero hemos creido que merecía más la pena implementar otras funcionalidades dado lo simple de nuestro escenario.
 
 ## Interconectando dos PBX con el protocolo IAX2
+Al igual que registramos terminales en una PBX el proceso para interconectar 2 PBX distintas es bastante similar. Veremos cómo una PBX se debe registrar en la otra y viceversa.
 
-### Kyoto's `iax.conf`
+Para implementar esta conexión tenímos dos protocolos posibles. Por un lado podíamos haber usado *SIP* tal y como hacemos con los terminales pero sin embargo hemos optado por utilizar *IAX2*, un protocolo definido por y para el propio `astrisk`. *IAX2* son siglas para **I**nter-**A**sterisk E**x**change **2**. La principal ventaja que nos ofrece además de estar tremendamente coordinado con `asterisk` por ser un protocolo nativo es que la señalización y los medios de las llamadas se cursan por la misma conexión, cosa que facilita mucho trabajar con PBX que se encuentren detrás de un *NAT*. No obstante este no es nuestro caso pues tanto PBXs como softphones pertenecen a la misma red local.
 
+No obstante sí podemos hacer uso del *trunking IAX2* que nos permite incluir varias comunicaciones independientes en un mismo paquete de red. Esto supone un menor impacto por la sobrecarga de las cabeceras introducidas por los protocolos de la pila *UDP/IP* que estamos empleando cosa que nos permite hacer un uso más eficiente del ancho de banda disponible.
+
+Al final del día, sin embargo, la principal ventaja de *IAX2* desde nuestro punto de vista ha sido la facilidad de configurción ya que solo hemos tenido que editar el archivo `iax.conf` para que todo funcionara. Al igual que para gestionar clientes *SIP*, la CLI de `asterisk` ofrece comandos que nos permiten trabajar de manera cómoda. Podemos invocar `iax2 reload` para recargar la configuración "al vuelo" y también podemos hacer uso de `iax2 show peers` para ver si aparecen los usuarios que tenemos configurados.
+
+Teniendo esto en mente incluimos la configuración de *IAX2* de nuestra PBX principal. Para facilitar el seguimiento de la sección asumiremos que ésta se encuentra en **Tokyo** mientras que la PBX auxiliar que hemos configurado se localiza en **Kyoto**.
+
+Señanalmos además que para levantar la PBX secundaria optamos por instalar `asterisk` en una nueva máquina virtual utilizando el gestor de paquetes `apt`. Con tan solo ejecutar `sudo apt update && sudo apt install asterisk` tenemos una máquina instalada con la configuración por defecto que conseguíamos tras compilarlo nosotros mismos. Si bien es verdad que la versión que conseguimos es la `13.8` es más que suficiente para nuestro propósito. Solo tuvimos que configurar un usuario y registrarlo en un softphone para poder hacer las pruebas pertinentes. Con eso en mente podemos pasar a analizar las configuraciones de cada máquina.
+
+### `iax.conf` en Tokyo
+```ini
+[general]
+; Si las conexiones con la otra PBX no se han asentido en un tiempo razonable desmantela la conexión
+; para evitar dejarla en un estado extraño...
+autokill=yes
+
+; Regístrate en la PBX de Kyoto con IP '192.168.1.24', nombre de usuario 'tokyo' y contraseña 'japan'
+register => tokyo:japan@192.168.1.24
+
+; Definimos un usuario contra el que se registrará la PBX de Kyoto. El nombre con el que definimos el usuario
+; debe ser el que se emplee en el 'iax.conf' de Kyoto a la hora de registrarse
+[kyoto]
+; La PBX de Kyoto puede hacer y recibir llamadas a/desde nuestra PBX
+type=friend
+
+; Enviaremos las llamadas a la IP con la que se registre Kyoto, no le asignamos ninguna en particular
+host=dynamic
+
+; Habilita el trunking IAX2
+trunk=yes
+
+; Contraseña que debe usar Kyoto al registrarse
+secret=japan
+
+; Las llamadas que nos haga Kyoto entrarán al contexto 'from-internal' definido en el archivo 'extensions.conf'
+context=from-internal
+
+; Prohibimos a cualquier IP se autentique...
+deny=0.0.0.0/0.0.0.0
+
+; ...y solo permitimos explítamenta a la 192.168.1.24 que lo haga, es decir, la IP de la PBX de Kyoto.
+;
+; A pesar de que parezca una contradicción establer la opción host=dynamic para luego solo permitir a una IP
+; autenticarse destacamos el caso en el que permitamos un rango de direcciones IP. En ese caso solo tendremos
+; que mandar las llamadas a la IP que se registre. Podríamos haber permitido a cualquier dirección de una LAN
+; conectarse por ejemplo. No obstante y dado lo sencillo de nuestro caso hemos decidido dar permiso a solo
+; la IP que nos interesaba.
+;
+; Aunque no lo hemos llevado a la práctica creemos que con un valor como 192.168.1.1/255.255.255.0 habilitamos
+; el rango de direcciones 192.168.1.1 - 192.168.1.254
+permit=192.168.1.24/255.255.255.255
+```
+
+Con todo vemos como la configuración del archivo `iax.conf` de Kyoto es *simétrica* en el sentido de que la dirección *IP* en la que nos registramos así como la que permitimos es la de la PBX de Tokyo. Asimismo, el usuario que generamos es para Tokyo.
+
+### `iax.conf` en Kyoto
 ```ini
 [general]
 autokill=yes
@@ -600,20 +656,49 @@ trunk=yes
 secret=japan
 context=from-internal
 deny=0.0.0.0/0.0.0.0
-permit=192.168.1.26/255.255.255.0
+permit=192.168.1.26/255.255.255.255
 ```
 
-### Kyoto's `extensions.conf`
+Una vez estén ambos archivos configurados bastará con ejecutar `iax2 reload` en ambas CLIs para ver cómo el registro ocurre automáticamente, cosa que podemos comprobar, como decíamos, con `iax2 show peers`.
+
+A la hora de configurar las extensiones debemos tener en cuenta que el *channel driver* es ahora *IAX2*, no *SIP*. Además de eso debemos explicitar a qué usuario de *IAX2* queremos mandar la llamada. En el caso del plan de marcación de Tokyo será Kyoto y viceversa. Además de ésto, no debemos olvidar seguir un orden lógico en cuanto a la asignación de las propias extensiones. Nosotros hemos optado por emplear los `2XX` para los usuarios registrados en la PBX de Tokyo y los `3XX` para los que pertenecen a la de Kyoto. No debemos olvidar respetarlo en **AMBAS** PBX o de lo contrario generaremos bucles en los que una llamada se mande a Tokyo desde Kyoto para que Tokyo la devuelva de nuevo hasta que algo "explote" en algún sitio. Al no haberlo configurado desconocemos si `asterisk` es capaz de detectar este suceso. Si por ejemplo Tokyo se da cuenta de que una llamada que viene desde Kyoto debe ser redirigida a Kyoto también no sabemos si sabe que debe abortarla o si sigue "a ciegas". En cualquier caso adjuntamos la configuración pertinente en ambas centralitas.
+
+Aprovechamos para recordar que la variable del canal `${EXTEN}` contiene el valor de la extensión marcada lo que nos permite resumir enormemente el plan de marcación. Asimismo, en la demostración que hemos hecho en video se incluía la aplicación de marcación `NoOp()` en primer lugar. Se empleó para depurar el funcionamiento pero, una vez afinado todo, se eliminó para facilitar la comprensión de la lógica detrás de la extensión.
+
+### `extensions.conf` en Tokyo
 ```ini
-; User calls!
+[from-internal]
+; Llamadas a usuarios locales
+exten => _2XX,1,Set(peer_name=${GLOBAL(${EXTEN})})
+    same => n,GotoIf($["${peer_name}" = ""]?wrong_peer,1)
+    same => n,gosub(store-data,s,1,(${EXTEN}))
+    same => n,Dial(SIP/${peer_name},10,tm(native-random))
+    same => n,VoiceMail(${EXTEN})
+
+exten => wrong_peer,1,Verbose(2,Called a wrong peer...)
+    same => n,Playback(tt-weasels)
+    same => n,Wait(1)
+    same => n,Hangup()
+
+; Llamadas a usuarios de Kyoto
+exten => _3XX,1,Dial(IAX2/kyoto/${EXTEN})
+    same => n,Hangup()
+```
+
+### `extensions.conf en Kyoto
+```ini
+[from-internal]
+; Llamadas a usuarios locales
 exten => _3XX,1,Set(peer_name=${GLOBAL(${EXTEN})})
         same => n,Dial(SIP/${peer_name},20)
 
-; Forward Calls to another PBX
-exten => _2XX,1,NoOp()
-        same => n,Dial(IAX2/tokyo/${EXTEN})
+; Llamadas a usuarios de Tokyo
+exten => _2XX,1,Dial(IAX2/tokyo/${EXTEN})
         same => n,Hangup()
 ```
+
+Para probar todo simplemente registramos un usuario en Kyoto y llamamos a otro registrado en Tokyo. Señalamos que esta configuración está totalmente basada en la que podemos encontrar [aquí](http://asteriskdocs.org/en/2nd_Edition/asterisk-book-html-chunk/I_sect14_tt670.html) y [aquí](http://www.asteriskdocs.org/en/3rd_Edition/asterisk-book-html-chunk/OutsideConnectivity_id291235.html#OutsideConnectivity_id291291).
+
 
 ## Integración con la [AGI](https://wiki.asterisk.org/wiki/pages/viewpage.action?pageId=32375589): Asterisk Gateway Interface
 La **AGI** no es más que una interfaz que permite a aplicaciones externas manipular el canal de una llamada a través de librerías. Nosotros hemos elegido emplear `Python` y la librería `Pyst2` para llevar a cabo estas funciones. Para poder trabajar con `Pyst2` debemos instalarlo. Con tan solo ejecutar el siguiente comando tendremos todo listo:
