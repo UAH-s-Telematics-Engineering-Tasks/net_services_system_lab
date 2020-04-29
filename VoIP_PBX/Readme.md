@@ -1082,7 +1082,7 @@ Las librerías que hemos empleado junto con `Python` se encuentran documentadas 
 - [`PyMongo`](https://api.mongodb.com/python/current/tutorial.html)
 - [`Pyst2`](https://pyst2.readthedocs.io/en/latest/)
 - [`GoogleAPI`](https://cloud.google.com/speech-to-text/docs/libraries#client-libraries-install-python)
-- [`urllib](https://docs.python.org/3.8/library/urllib.request.html#module-urllib.request)
+- [`urllib`](https://docs.python.org/3.8/library/urllib.request.html#module-urllib.request)
 
 # Anexo
 ## Preparando el entorno para asterisk
