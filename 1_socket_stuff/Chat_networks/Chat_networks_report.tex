@@ -1,0 +1,566 @@
+\documentclass[landscape]{article}
+
+\usepackage{minted}
+
+\usepackage{geometry}
+ \geometry{
+ a4paper,
+ %total = {170mm,257mm},
+ left = 15mm,
+ %top = 20mm,
+ }
+
+\title{HTTP Server Report}
+\author{Pablo Collado Soto}
+\date{}
+
+\begin{document}
+
+    \maketitle
+
+    \section{Client - Server Architecture}
+        \subsection{Server}
+            \begin{minted}[linenos]{python}
+######################################################
+#                   Imports                          #
+# socket -> Let's us manage socket instances         #
+# sys -> Grant access to the passed arguments        #
+# select -> Let's us work concurrently with sockets  #
+# os -> Let's us clear the screen when printing info #
+######################################################
+
+# NOTE: As these imports are always the same we'll just talk about them here so as not to bloat the document!
+
+import socket, sys, select, os
+
+##################################################################################################################
+#                                  Closing sockets and the TIME_WAIT interval                                    #
+# As seen in https://serverfault.com/questions/329845/how-to-forcibly-close-a-socket-in-time-wait and in         #
+# RFC 793 (https://tools.ietf.org/html/rfc793), when closing a TCP socket it will remain "open" long             #
+# enough to guarantee the FIN ACK segment has reached the opposite end. If we close the clients then             #
+# the random port they've reserved will be held for some time. As clients are not binded to a specific port      #
+# this will have no impact whatsoever when launching new clients, they'll just get a new port number and life    #
+# will seamlessly go on. If we manually close the server however the port we had binded it to will continue      #
+# to be used for TIME_WAIT seconds... We can check that by running netstat and looking at the top of the         #
+# output. Lazy people like me would instead run netstat | head -n 20 and get away with it. We can configure      #
+# this TIME_WAIT to be 0. I'm not sure whether that's done on form python on the socket or from the OS on the    #
+# network manager... Anyway we should not forget it's there and that, even if we shut down our sockets correctly #
+# we will have an inherent delay due to how TCP works... When we close every client gracefully and end up        #
+# shutting the server down we won't experience this behaviour as the server is only left with the "listening"    #
+# socket, there are NO connections open so there is no need to wait for them to receive the final message!       #
+##################################################################################################################
+
+##################################################################################################################
+#                                          Allowing Outside Connections                                          #
+# In order to allow connections from the outside we must bind the server to every interface or, at least the one #
+# providing connectivity to the outside world. If we only bind to that "outwards" interface we won't be able to  #
+# connect local clients... We can then choose to bind to '' instead of '127.0.0.1' which is interpreted as       #
+# INADDR_ANY by Pyhton, that is, we'll bind the server to EVERY interface                                        #
+##################################################################################################################
+
+def main():
+    if len(sys.argv) != 2:
+        print("Use: {} <binding_port>".format(sys.argv[0]))
+        exit(-1)
+
+    # The readable_sources dictionary contains the different socket instances as values and some information identifying
+    # them as the key. These keys will be derived from the first message sent by each client as soon as they connect.
+    readable_sources = {'serving_sock': socket.socket(socket.AF_INET, socket.SOCK_STREAM)}
+
+    # Bind the socket and get ready for incoming connections
+    readable_sources['serving_sock'].bind(('127.0.0.1', int(sys.argv[1])))
+
+    print("Listening for connections...")
+
+    readable_sources['serving_sock'].listen(1)
+
+    # These variables let us monitor images being sent through us so that we can
+    # act accordingly
+    img_passing = False
+    passed_bytes = 0
+
+    try:
+        while True:
+            for src in select.select(list(readable_sources.values()), [], [])[0]:
+
+                # If we got a new client accept it and read its ID Tag. Note reading on a socket
+                # not monitored by select() is not such a good idea as it may block our server
+                # indefinitely but as we have implemented both the client and server we can
+                # get away with this little "botch"
+                if src == readable_sources['serving_sock']:
+                    new_client = src.accept()[0]
+                    readable_sources[new_client.recv(8148).decode()] = new_client
+
+                # If the message came from a socket connected from a client
+                else:
+                    inc_msg = src.recv(8148)
+
+                    # If there is no image traversing us at the moment we can safely decode the message.
+                    # Otherwise we could be attempting to decode some invalid bytes and that would trigger
+                    # an exception...
+                    if not img_passing:
+
+                        # If the peer socket's been closed close this end and remove it from the monitored list
+                        if inc_msg.decode() == '':
+                            src.close()
+
+                            # As we are working with dictionaries so that we can print more meaningful information we need
+                            # to jump thorugh some hoops to get the correct value to delete...
+                            del readable_sources[list(readable_sources.keys())[list(readable_sources.values()).index(src)]]
+
+                        # Our image sending protocol starts with an 'IMG_INCOMING!' message. It that's the case activate
+                        # the "image mode" until the given number of bytes have passed
+                        elif 'IMG_INCOMING!' in inc_msg.decode():
+                            img_passing = True
+                            passed_bytes = int(inc_msg.decode().split(';')[1])
+
+                    # We are currently transmitting an image
+                    else:
+
+                        # Keep track of all the sent bytes
+                        passed_bytes -= len(inc_msg)
+
+                        # If we are done deactivate "image mode"
+                        if passed_bytes == 0:
+                            img_passing = False
+                    
+                    # As the data is of no interest to us we don't need to decode() it. We can just send it away
+                    for c_sock in list(readable_sources.values())[1:]:
+                            if c_sock != src:
+                                c_sock.sendall(inc_msg)
+
+            # As images can be large printing information on the screen at such a high rate makes the terminal flicker
+            # so avoid printing any more information whilst an image is being sent
+            if not img_passing:
+
+                # Take advantage of the informative tags sent by the clients so that we can show meaningful info at the output!
+                os.system("clear")
+                print("Connected clients:")
+                for client, c_sock in list(readable_sources.items())[1:]:
+                    print("\t{} -> {}:{}".format(client, c_sock.getpeername()[0], c_sock.getpeername()[1]))
+
+    # When we receive CTRL + C
+    except KeyboardInterrupt:
+        print("Quitting...")
+
+        # Close every socket and quit!
+        for sock in readable_sources.values():
+            sock.close()
+        exit(0)
+
+if __name__ == '__main__':
+    main()
+            \end{minted}
+
+        \subsection{Client}
+            \begin{minted}[linenos]{python}
+import socket, sys, select, time
+
+#####################################################################
+#                           Imports                                 #
+# time -> Let's us introduce the needed delays when sending images! #
+#####################################################################
+
+# NOTE: The socket module has a sendfile() method but we decided to manually do it ourselves.
+# NOTE: At least for the first time...
+
+#############################################################################################
+#                              How cool are ANSI Escape Sequences?                          #
+# ANSI Escape Sequences are, as their name implies, special sequences that we can print     #
+# to a terminal to control its behavior instead of showing characters on screen. You can    #
+# find a very comprehensive table over at https://en.wikipedia.org/wiki/ANSI_escape_code.   #
+# We have used the following sequences which can be found in the aforementioned site:       #
+#           ESC[nF -> Move the cursor to the beginning of the line n lines up               #
+#           ESC[nG -> Move the cursor to column n in the current line                       #
+#           ESC[2K -> Erase the entire line without changing the cursor¡s position          #
+# Note the ESC character is given by 0x1B or 27 as seen in the ASCII table, that's why      #
+# you see the leading \x1B in these sequences. Tradition has it that we use the octal       #
+# equivalent, \033, but we are more of the "hexy" kind... Combining these escape sequences  #
+# with the program flow we have amanged to build a more visually appealing CLI for our chat #
+# client but it's still not as robust as we would like it to be...                          #
+#############################################################################################
+
+def main():
+    if len(sys.argv) != 4:
+        print("Use: {} <server_IP> <server_port> <username>".format(sys.argv[0]))
+        exit(-1)
+    elif sys.argv[3] == 'serving_sock':
+        print("This username is restricted... Use another one!")
+        exit(-1)
+
+    # CLI Stuff
+    prompt = 'Type something --> '
+    clear_prompt = "\x1B[1G" + "\x1B[2K"
+    clear_input = "\x1B[1F" + "\x1B[2K"
+
+    # We could also use this clear_prompt sequence depending on our taste!
+    # clear_prompt = "\x1B[" + str(len(prompt)) + "D" + "\x1B[2K"
+
+    # Set up our connection socket
+    info_sources = [socket.socket(socket.AF_INET, socket.SOCK_STREAM), sys.stdin]
+    info_sources[0].connect((sys.argv[1], int(sys.argv[2])))
+
+    # Send the username as soon as you connect so that the server can move on!
+    info_sources[0].sendall(sys.argv[3].encode())
+
+    print("We're connected to -> {}:{}".format(sys.argv[1], sys.argv[2]))
+
+    # Variables for controlling image sending and reception
+    inc_file = None
+    reading_file = False
+    rcv_bytes = 0
+
+    try:
+        while True:
+
+            # If we are receiving an image don't write the prompt. Note we are flushing it because there
+            # is no trailing newline ('\n'). Most terminals won't clear the buffers until they see one...
+            if not reading_file:
+                print(prompt, end = '', flush = True)
+            for src in select.select(info_sources, [], [])[0]:
+
+                # If the user has typed a message
+                if src == sys.stdin:
+
+                    # Read it
+                    inc_msg = sys.stdin.readline().rstrip()
+
+                    # If they want to send an image
+                    if "send_img" in inc_msg:
+
+                        # Open it up for reading IN BINARY after getting the filename
+                        f_name = inc_msg.split(' ')[1]
+                        img = open(f_name, 'rb')
+                        img_data = img.read()
+
+                        # Inform the server and clients that you're about to send an image and its lenght
+                        info_sources[0].sendall(("IMG_INCOMING!;" + str(len(img_data))).encode())
+
+                        # Wait to make sure TCP buffers are cleared!
+                        time.sleep(0.1)
+
+                        # Send all the data
+                        info_sources[0].sendall(img_data)
+
+                        # Close the file and move on
+                        img.close()
+
+                    # If we are not sending an image
+                    else:
+                        # Build the output message by appending your username
+                        out_msg = sys.argv[3] + " -> " + inc_msg
+
+                        # Print the message to your own screen
+                        print(clear_input + out_msg)
+
+                        # Ans send it to the server
+                        info_sources[0].sendall(out_msg.encode())
+
+                # If we are receiving a message
+                else:
+                    # And it's not a file
+                    if not reading_file:
+
+                        # We can safely decode it
+                        i_msg = info_sources[0].recv(8148).decode()
+
+                        # The server has either kicked us out or gone down, just quit
+                        if i_msg == '':
+                            raise KeyboardInterrupt
+
+                        # If an image is about to come
+                        elif 'IMG_INCOMING!' in i_msg:
+
+                            # Get the total incoming bytes
+                            rcv_bytes = int(i_msg.split(';')[1])
+
+                            # Tell the user
+                            print(clear_prompt + "Image incoming!\tSize: {}".format(rcv_bytes))
+
+                            # Open a file for storing the incoming data
+                            inc_file = open("rcv_img.png", 'wb')
+
+                            # And activate the reading mode, again, to prevent decoding illegal bytes
+                            reading_file = True
+
+                        # If there is no file coming just print the message
+                        else:
+                            print(clear_prompt + i_msg)
+
+                    # While we are reading an image
+                    else:
+
+                        # Read the data without attempting to decode it
+                        i_msg = info_sources[0].recv(8148)
+
+                        # Keep track of the received bytes
+                        rcv_bytes -= len(i_msg)
+
+                        # Write the data to the opened file
+                        inc_file.write(i_msg)
+
+                        # When finished just close the file and deactivate the "image mode"
+                        if rcv_bytes == 0:
+                            reading_file = False
+                            inc_file.close()
+
+    # If we receive CTRL + C or the server tears down our connection
+    except KeyboardInterrupt:
+        print("Quitting...")
+
+        # Close our socket and just quit
+        info_sources[0].close()
+        exit(0)
+
+if __name__ == "__main__":
+    main()
+            \end{minted}
+
+    \section{Peer-to-peer \texttt{P2P} Architecture}
+        \subsection{Welcome Server (\texttt{UDP} based)}
+            \begin{minted}[linenos]{python}
+import socket, select, sys, os
+
+##################################################################
+#                   SIGNALLING MESSAGE FORMATS                   #
+# Welcome Message Format -> "I'm up!;username;entry_socket_port" #
+# Peer Address Format    -> "IP:Port"                            #
+# Goodbye Message Format -> "Bye!;username"                      #
+##################################################################
+
+def main():
+    if len(sys.argv) != 2:
+        print("Use: {} <binding_port>".format(sys.argv[0]))
+        exit(-1)
+
+    # We're using UDP for sending and receiving messages
+    welcome_soket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    # Begin listening for new and departing peers
+    welcome_soket.bind(('127.0.0.1', int(sys.argv[1])))
+
+    # This dictionary contains the usernames as keys and a string of
+    # the form 'IP:PORT' as values. These are the IP and PORT of
+    # a peer's welcome socket, i.e, the one it accepts connections on
+    active_peers = {}
+
+    print("Waiting for new peers...")
+
+    try:
+        while True:
+            # Using select here is just overkill but we want to be consistent...
+            for src in select.select([welcome_soket], [], [])[0]:
+
+                # This is the only possible source anyway... Checking it improves readability though!
+                if src == welcome_soket:
+
+                    # We'll need the sender's IP. Note ther is no use for the port number as it
+                    # belongs to the UDP socket and we are only concerned with the TCP socket
+                    # accepting connections. That's the one the peer will let us know about!
+                    msg, source = src.recvfrom(8148)
+
+                    # If the peer is introducing itslef
+                    if "I'm up!" in msg.decode():
+
+                        # Send info pertaining already connected peers back
+                        for peer, cnx_point in active_peers.items():
+                            src.sendto((peer + ';' + cnx_point).encode(), source)
+
+                        # Then add an entry for this new peer in our dictionary
+                        active_peers[msg.decode().split(';')[1]] = source[0] + ';' + msg.decode().split(';')[2]
+
+                    # If the peer is disconnecting
+                    elif "Bye!" in msg.decode():
+
+                        # Just delete the associated entry in our dictionary
+                        del active_peers[msg.decode().split(';')[1]]
+
+            # Clear the terminal's screen
+            os.system("clear")
+            print("Live peers:")
+
+            # Take advantage of the meaningful keys we are using to show information on the current network status
+            for peer, cnx_point in active_peers.items():
+                print("\t{} -> {}:{}".format(peer, cnx_point.split(';')[0], cnx_point.split(';')[1]))
+
+    # If we receive CTRL + C
+    except KeyboardInterrupt:
+        print("Quitting...")
+
+        # Close the socket and quit but don't tell the peers. The P2P network must function independently of this server!
+        welcome_soket.close()
+        exit(0)
+
+if __name__ == "__main__":
+    main()
+            \end{minted}
+
+        \subsection{Peer}
+            \begin{minted}[linenos]{python}
+import socket, sys, select
+
+################################################################
+#               SIGNALLING MESSAGE FORMATS                     #
+# peer_info (see line 95) -> "peer_username;peer_IP;peer_port" #
+################################################################
+
+def main():
+    if len(sys.argv) != 4:
+        print("Use: {} <server_IP> <server_port> <username>".format(sys.argv[0]))
+        exit(-1)
+    elif sys.argv[3] == 'introduction_sock' or sys.argv[3] == 'entry_sock' or sys.argv[3] == 'keybrd':
+        print("Invalid username!")
+        exit(-1)
+
+    # CLI Stuff
+    prompt = 'Type something --> '
+    clear_prompt = "\x1B[1G" + "\x1B[2K"
+    clear_input = "\x1B[1F" + "\x1B[2K"
+
+    # We'll use this list to check whether a key is associated with a peer or it is related to a "special" socket.
+    # This'll let us condense code when printing peer_sockets' keys as we'll see later on as well as decide who
+    # to send messages to!
+    special_sockets = ['keybrd', 'introduction_sock', 'entry_sock']
+
+    # This dictionary will hold every monitored socket plus the keyboard:
+        # 'keyboard' -> The associated value is the keyboard's file descriptor
+        # 'introduction_sock' -> UDP socket used to introduce ourselves to the net and get info regarding active peers
+                               # We'll also use it when disconnecting to inform the server so that it forgets about us
+        # 'entry_sock' -> TCP socket used for accepting new peers
+
+    # New entries will use the peer's username as the dictionaries key and the value will be the corresponding socket instance
+    peer_sockets = {'keybrd': sys.stdin,
+                    'introduction_sock': socket.socket(socket.AF_INET, socket.SOCK_DGRAM),
+                    'entry_sock': socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    }
+
+    # Binding to port number 0 will use any available port. The kernel will be smart enough to assign one.
+    # Begin listening for new peers afterwards
+    peer_sockets['entry_sock'].bind(('127.0.0.1', 0))
+    peer_sockets['entry_sock'].listen(1)
+
+    # The getsockname() method lets us get the IP and PORT of a given socket. Remember we are not using a user supplied port...
+    print("We are listening for peers @ {}:{}".format(peer_sockets['entry_sock'].getsockname()[0], peer_sockets['entry_sock'].getsockname()[1]))
+
+    # Tell the server we are up so that it takes note and sends back info about already existing peers
+    peer_sockets['introduction_sock'].sendto(("I'm up!;" + sys.argv[3] + ';' + str(peer_sockets['entry_sock'].getsockname()[1])).encode(),
+                                             (sys.argv[1], int(sys.argv[2])))
+
+    print("We have introduced ourselves to the central server!\nTime to connect to the peers!")
+
+    try:
+        while True:
+
+            # Write the prompt and flush it, remember we don't have a trailing '\n'
+            print(prompt, end = '', flush = True)
+            ready_socks = select.select(list(peer_sockets.values()), [], [])[0]
+            for src in ready_socks:
+
+                # If the user typed a message
+                if src == sys.stdin:
+
+                    # Read it
+                    in_data = sys.stdin.readline().rstrip()
+
+                    # If the user want's to know who he/she is connected to...
+                    if in_data == 'get_status':
+                        print(clear_input + "Connected peers:")
+
+                        # Print the associated peer_sockets' keys, i.e, the usernames
+                        for peer in peer_sockets:
+
+                            # As dicitonaries don't have to be ordered we'll check the name we print doesn't belong to either the
+                            # keyboard, the introduction UDP socket or the binded TCP one. This is why we defined the special_sockets
+                            # list at the beginning.
+                            if peer not in special_sockets:
+                                print("\t" + peer)
+
+                    # If it's a regular message
+                    else:
+
+                        # Build it by appending your own username
+                        out_msg = sys.argv[3] + " -> " + in_data
+                        print(clear_input + out_msg)
+
+                        # Send the message only to peers!
+                        for peer, sock in peer_sockets.items():
+                            if peer not in special_sockets:
+                                sock.sendall(out_msg.encode())
+
+                # If there is a message coming to the UDP socket it must be info about a peer
+                elif src == peer_sockets['introduction_sock']:
+
+                    # Parse the incoming message
+                    peer_info = src.recv(8148).decode().split(';')
+
+                    # Add an entry in the peer_sockets dictionary
+                    peer_sockets[peer_info[0]] = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+                    # Tell the user we have received info about a new client
+                    print(clear_prompt + "Connecting to peer {} @ {}:{}".format(peer_info[0], peer_info[1], peer_info[2]))
+
+                    # Connect to said client
+                    peer_sockets[peer_info[0]].connect((peer_info[1], int(peer_info[2])))
+
+                    # Send our username to the new peer right away. He/she will be waiting for it!
+                    peer_sockets[peer_info[0]].sendall(sys.argv[3].encode())
+
+                # If a new peer is connecting to us
+                elif src == peer_sockets['entry_sock']:
+
+                    # Accept it
+                    new_sock, new_addr = src.accept()
+
+                    # Get it's username. Reading here is not as dangerous as it could be because all peers are implemented in the
+                    # same way!
+                    peer_username = new_sock.recv(8148).decode()
+
+                    # Tell the user a new peer is connecting to us
+                    print(clear_prompt + "Got new peer {} @ {}:{}".format(peer_username, new_addr[0], new_addr[1]))
+
+                    # Add the new peer to our dictionary
+                    peer_sockets[peer_username] = new_sock
+
+                # If the message came to an already connected socket
+                else:
+
+                    # Decode it
+                    inc_msg = src.recv(8148).decode()
+
+                    # If we get an empty string (i.e EOF) it means the other end has closed the socket
+                    if inc_msg == '':
+
+                        # Get the socket's index
+                        socket_index = list(peer_sockets.keys())[list(peer_sockets.values()).index(src)]
+
+                        # Tell the user a peer has disconnected
+                        print(clear_prompt + "Disconecting from peer {} @ {}:{}".format(socket_index, src.getpeername()[0], src.getpeername()[1]))
+
+                        # Close it
+                        src.close()
+
+                        # And delete it
+                        del peer_sockets[socket_index]
+
+                    # Otherwise just print the message
+                    else:
+                        print(clear_prompt + inc_msg)
+
+    # If we get a CTRL + C signal
+    except KeyboardInterrupt:
+        print("Quitting...")
+
+        # Tell the server we are leaving
+        peer_sockets['introduction_sock'].sendto(("Bye!;" + sys.argv[3]).encode(), (sys.argv[1], int(sys.argv[2])))
+
+        # Close all the open sockets, including the UDP and binded TCP ones
+        for peer in list(peer_sockets.values())[1:]:
+            peer.close()
+
+        # And quit
+        exit(0)
+
+if __name__ == "__main__":
+    main()
+            \end{minted}
+\end{document}

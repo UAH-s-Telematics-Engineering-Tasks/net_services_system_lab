@@ -1,0 +1,20 @@
+VAGRANTFILE_API_VERSION = "2"
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  config.vm.box = "ubuntu/bionic64"
+  config.vm.provider "virtualbox" do |v|
+  v.customize ["modifyvm", :id, "--memory", 1024]
+  end
+
+  config.vm.define "endor" do |endor|
+    endor.vm.hostname = 'endor'
+    endor.vm.network :private_network, ip: "10.0.123.2"
+    endor.vm.provision "shell", :path => "host_setup.sh"
+  end
+
+  config.vm.define "hoth" do |hoth|
+    hoth.vm.hostname = 'hoth'
+    hoth.vm.network :private_network, ip: "10.0.123.3"
+    hoth.vm.provision "shell", :path => "host_setup.sh"
+  end
+end
